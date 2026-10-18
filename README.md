@@ -22,6 +22,11 @@ Aplikacja pomocnicza dla pilota VFR (samoloty i UL). Łączy:
   - Ostrzeżenie w zakładce NAV i na mapie, gdy jesteś w aktywnej strefie albo lecisz na nią w ciągu 5 NM, z uwzględnieniem wysokości.
   - Sprawdzanie trasy: lista stref przecinanych przez trasę na planowanej wysokości.
   - Lista stref w zakładce Baza, z filtrem dolnej granicy (domyślnie poniżej 9500 ft).
+- **Pełna przestrzeń powietrzna Polski i Europy (openAIP).** CTR/MCTR, TMA/CTA, ATZ, TRA/TSA, R/P/D, RMZ/TMZ, MRT, FIR i inne, pobierane per kraj (presety: Polska, + sąsiedzi, Europa).
+  - Każdą grupę włączasz i wyłączasz osobno w zakładce Baza.
+  - Dotknięcie pustego miejsca na mapie pokazuje wszystkie strefy w tym punkcie (statyczne i AUP).
+  - W zakładce NAV linia „Przestrzeń w Twojej pozycji”.
+  - Dane openAIP, licencja CC BY-NC 4.0 (użycie niekomercyjne, wymagane podanie źródła).
 - **Direct-To** do dowolnego lotniska, lądowiska lub pomocy nawigacyjnej. Pokazuje BRG, DIST, ETE, ETA i strzałkę skrętu.
 - **Bazę lotnisk i pomocy nawigacyjnych** pobieraną z OurAirports, filtrowaną po krajach i działającą offline. Do tego **własne lądowiska** (UL, trawiaste) dodawane ręcznie albo z pliku CSV.
 - **Mapę** (OpenStreetMap / osmdroid). Pokazuje VOR, DME, NDB, lotniska, samolot, linię D→ i linie kursów OBS z NAV1/NAV2. Dotknięcie punktu otwiera akcje.
@@ -77,6 +82,7 @@ Wymagania: Android 8.0+ (API 26), GPS.
 | `nav/RoutePlanner.kt` | trasa przez VOR (Dijkstra), instrukcje radialowe odcinków, XTK |
 | `data/Airspace.kt` | pobieranie i parsowanie AUP/UUP z airspace.pansa.pl, geometria stref |
 | `nav/ZoneAlerts.kt` | ostrzeżenia o strefach i konflikty trasy ze strefami |
+| `data/StaticAirspace.kt` | przestrzeń z openAIP: pobieranie krajów, strumieniowe czytanie GeoJSON, grupy stref |
 | `nav/VorReceiver.kt` | wirtualny odbiornik: radial, CDI, TO/FROM, DME skośne, zasięg, fixy |
 | `data/NavDb.kt` | baza SQLite: wyszukiwanie, najbliższe, częstotliwości, własne lądowiska |
 | `data/Importer.kt` | import OurAirports (CSV RFC 4180) i własnych CSV, parser współrzędnych DMS |

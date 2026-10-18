@@ -6,6 +6,7 @@ import android.graphics.Path
 import android.graphics.Point
 import android.view.MotionEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,7 +40,18 @@ import pl.pilot.vornav.nav.VorReceiver
 import kotlin.math.hypot
 
 /** Rysuje na mapie lotniska, pomoce nawigacyjne, samolot, linię Direct-To i wybrane radiale OBS. */
-class NavOverlay(private val onTap: (Waypoint) -> Unit) : Overlay() {
+class NavOverlay(
+    private val onTap: (Waypoint) -> Unit,
+    private val onEmptyTap: (Double, Double) -> Unit = { _, _ -> },
+) : Overlay() {
+    /** Strefy openAIP do narysowania (już przefiltrowane). */
+    var areas: List<pl.pilot.vornav.data.AirspaceArea> = emptyList()
+    private val areaFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val areaText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 22f; textAlign = Paint.Align.CENTER
+        setShadowLayer(3f, 0f, 0f, android.graphics.Color.WHITE)
+    }
+
     var points: List<Waypoint> = emptyList()
     var aircraft: Position? = null
     var direct: Waypoint? = null
@@ -84,6 +96,43 @@ class NavOverlay(private val onTap: (Waypoint) -> Unit) : Overlay() {
             stroke.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f, 12f), 0f)
             c.drawLine(pt.x.toFloat(), pt.y.toFloat(), pt2.x.toFloat(), pt2.y.toFloat(), stroke)
             stroke.pathEffect = null
+        }
+
+        // statyczna przestrzeń (openAIP): tylko w widoku, bez strzępków mniejszych niż kilka pikseli
+        if (areas.isNotEmpty()) {
+            val bb = mv.boundingBox
+            for (a in areas) {
+                if (a.latMax < bb.latSouth || a.latMin > bb.latNorth || a.lonMax < bb.lonWest || a.lonMin > bb.lonEast) continue
+                pj.toPixels(GeoPoint(a.latMin, a.lonMin), pt); pj.toPixels(GeoPoint(a.latMax, a.lonMax), pt2)
+                val wPx = kotlin.math.abs(pt2.x - pt.x); val hPx = kotlin.math.abs(pt2.y - pt.y)
+                if (wPx < 4 && hPx < 4) continue
+                val col = a.category.color
+                val dashed = a.category == pl.pilot.vornav.data.AspCategory.CTR || a.category == pl.pilot.vornav.data.AspCategory.RMZ
+                for (r in a.rings) {
+                    val path = Path()
+                    var i = 0
+                    while (i < r.size - 1) {
+                        pj.toPixels(GeoPoint(r[i], r[i + 1]), pt)
+                        if (i == 0) path.moveTo(pt.x.toFloat(), pt.y.toFloat()) else path.lineTo(pt.x.toFloat(), pt.y.toFloat())
+                        i += 2
+                    }
+                    path.close()
+                    if (a.category == pl.pilot.vornav.data.AspCategory.RPD || a.category == pl.pilot.vornav.data.AspCategory.CTR) {
+                        areaFill.color = (col and 0x00FFFFFF) or 0x18000000
+                        c.drawPath(path, areaFill)
+                    }
+                    stroke.pathEffect = if (dashed) android.graphics.DashPathEffect(floatArrayOf(18f, 10f), 0f) else null
+                    stroke.color = col; stroke.strokeWidth = 3f
+                    c.drawPath(path, stroke)
+                    stroke.pathEffect = null
+                }
+                if (zoom >= 9 && wPx > 120) {
+                    pj.toPixels(GeoPoint(a.centerLat, a.centerLon), pt)
+                    areaText.color = col
+                    c.drawText(a.name, pt.x.toFloat(), pt.y.toFloat(), areaText)
+                    c.drawText("${a.lowerText}–${a.upperText}", pt.x.toFloat(), pt.y + 24f, areaText)
+                }
+            }
         }
 
         for ((z, active, label) in zones) {
@@ -189,9 +238,14 @@ class NavOverlay(private val onTap: (Waypoint) -> Unit) : Overlay() {
     }
 
     override fun onSingleTapConfirmed(e: MotionEvent, mapView: MapView): Boolean {
-        val hit = drawn.minByOrNull { hypot((it.second.x - e.x).toDouble(), (it.second.y - e.y).toDouble()) } ?: return false
-        if (hypot((hit.second.x - e.x).toDouble(), (hit.second.y - e.y).toDouble()) > 60) return false
-        onTap(hit.first); return true
+        val hit = drawn.minByOrNull { hypot((it.second.x - e.x).toDouble(), (it.second.y - e.y).toDouble()) }
+        if (hit != null && hypot((hit.second.x - e.x).toDouble(), (hit.second.y - e.y).toDouble()) <= 60) {
+            onTap(hit.first); return true
+        }
+        // dotknięcie pustego miejsca: pokaż strefy w tym punkcie
+        val g = mapView.projection.fromPixels(e.x.toInt(), e.y.toInt())
+        onEmptyTap(g.latitude, g.longitude)
+        return true
     }
 }
 
@@ -215,8 +269,13 @@ fun MapScreen(vm: NavViewModel) {
     val counts by vm.counts.collectAsState()
     var follow by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<Waypoint?>(null) }
+    var tapPoint by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    val allAreas by vm.areas.collectAsState()
+    val showAreas by vm.showAreas.collectAsState()
+    val areaCats by vm.areaCats.collectAsState()
 
-    val overlay = remember { NavOverlay { selected = it } }
+    val overlay = remember { NavOverlay({ selected = it; tapPoint = null }, { la, lo -> tapPoint = la to lo; selected = null }) }
+
     val boxFlow = remember { MutableStateFlow<DoubleArray?>(null) }
     val mapView = remember {
         MapView(ctx).apply {
@@ -232,6 +291,11 @@ fun MapScreen(vm: NavViewModel) {
                 override fun onZoom(event: ZoomEvent?): Boolean { pushBox(this@apply, boxFlow); return false }
             })
         }
+    }
+
+    LaunchedEffect(allAreas, showAreas, areaCats, zoneMaxFt) {
+        overlay.areas = if (showAreas) vm.visibleAreas(allAreas, areaCats, zoneMaxFt) else emptyList()
+        mapView.invalidate()
     }
 
     DisposableEffect(Unit) {
@@ -316,6 +380,43 @@ fun MapScreen(vm: NavViewModel) {
                 color = Color.DarkGray,
                 modifier = Modifier.align(Alignment.BottomStart).background(Color(0x99FFFFFF)).padding(2.dp)
             )
+            tapPoint?.let { (la, lo) ->
+                val now = System.currentTimeMillis()
+                val inStatic = remember(la, lo, allAreas, areaCats) {
+                    allAreas.filter { (it.category in areaCats || it.category == pl.pilot.vornav.data.AspCategory.FIR) && it.contains(la, lo) }
+                        .sortedBy { it.lowerFt }
+                }
+                val inAup = remember(la, lo, allZones) { allZones.filter { it.contains(la, lo) } }
+                Surface(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
+                    shape = RoundedCornerShape(12.dp), color = PanelBg, tonalElevation = 6.dp
+                ) {
+                    Box {
+                        Column(
+                            Modifier.padding(12.dp).heightIn(max = 300.dp)
+                                .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("${Geo.formatLat(la)} ${Geo.formatLon(lo)}", fontSize = 12.sp, color = Color(0xFF8FA3B8))
+                            if (inStatic.isEmpty() && inAup.isEmpty()) Text("Brak stref w tym punkcie (w pobranych danych)", fontSize = 13.sp)
+                            inAup.forEach { z ->
+                                val r = z.activeAt(now) ?: z.nextFrom(now)
+                                if (r != null) Text(
+                                    "AUP ${z.designator}: ${pl.pilot.vornav.nav.ZoneAlerts.altText(r)} • ${pl.pilot.vornav.nav.ZoneAlerts.timeText(r)}" +
+                                        if (z.activeAt(now) != null) " • AKTYWNA" else "",
+                                    fontSize = 13.sp, color = if (z.activeAt(now) != null) ZoneRed else ZoneOrange
+                                )
+                            }
+                            inStatic.forEach { a ->
+                                Text("${a.name} • ${a.label} • ${a.lowerText}–${a.upperText}", fontSize = 13.sp, color = Color(a.category.color))
+                            }
+                        }
+                        IconButton(onClick = { tapPoint = null }, modifier = Modifier.align(Alignment.TopEnd)) {
+                            Icon(Icons.Filled.Close, "Zamknij")
+                        }
+                    }
+                }
+            }
             selected?.let { wp ->
                 Surface(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),

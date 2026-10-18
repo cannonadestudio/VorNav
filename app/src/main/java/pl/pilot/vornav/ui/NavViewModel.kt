@@ -13,6 +13,9 @@ import kotlinx.coroutines.withContext
 import pl.pilot.vornav.data.Importer
 import pl.pilot.vornav.data.AirspaceRepo
 import pl.pilot.vornav.data.Zone
+import pl.pilot.vornav.data.AirspaceArea
+import pl.pilot.vornav.data.AspCategory
+import pl.pilot.vornav.data.StaticAirspaceRepo
 import kotlinx.coroutines.delay
 import pl.pilot.vornav.data.NavDb
 import pl.pilot.vornav.data.Waypoint
@@ -82,6 +85,18 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
     /** Pokazuj tylko strefy, których dolna granica jest poniżej tej wysokości (ft). */
     val zoneMaxFt = MutableStateFlow(prefs.getInt("zoneMaxFt", 9500))
 
+    // ---------- przestrzeń powietrzna (openAIP) ----------
+    private val aspRepo = StaticAirspaceRepo(app)
+    val areas = MutableStateFlow<List<AirspaceArea>>(emptyList())
+    val showAreas = MutableStateFlow(prefs.getBoolean("showAreas", true))
+    val areaCats = MutableStateFlow(
+        prefs.getStringSet("areaCats", null)?.mapNotNull { n -> AspCategory.entries.firstOrNull { it.name == n } }?.toSet()
+            ?: AspCategory.entries.filter { it.defaultOn }.toSet()
+    )
+    val aspCountries = MutableStateFlow(prefs.getString("aspCountries", "PL,DE,CZ,SK,LT") ?: "PL")
+    val aspStatus = MutableStateFlow("")
+    val aspBusy = MutableStateFlow(false)
+
     /** Komunikat jednorazowy (snackbar). */
     val toast = MutableStateFlow<String?>(null)
 
@@ -109,6 +124,13 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
                 if (age > 30 * 60_000L) refreshZonesNow()
                 delay(5 * 60_000L)
             }
+        }
+        // przestrzeń z openAIP: wczytanie z dysku, automatyczna aktualizacja gdy starsza niż 7 dni
+        viewModelScope.launch {
+            areas.value = aspRepo.loadAll()
+            updateAspStatus()
+            val age = System.currentTimeMillis() - aspRepo.lastUpdate()
+            if (aspRepo.files().isNotEmpty() && age > 7 * 24 * 3600_000L) downloadAirspace()
         }
         // automatyczne przełączanie odcinków trasy
         viewModelScope.launch {
@@ -307,6 +329,51 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
     /** Strefy po filtrze wysokości (dolna granica poniżej limitu albo nieznana). */
     fun visibleZones(all: List<Zone>, maxFt: Int): List<Zone> =
         all.filter { z -> z.reservations.any { (it.lowerFt ?: 0) < maxFt } }
+
+    // ---------- przestrzeń powietrzna (openAIP) ----------
+
+    private fun updateAspStatus(extra: String? = null) {
+        val cc = aspRepo.storedCountries()
+        val base = if (cc.isEmpty()) "Brak pobranej przestrzeni — wybierz kraje i pobierz"
+        else "${areas.value.size} stref z ${cc.size} krajów (${cc.joinToString(",")}), aktualizacja " +
+            java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(aspRepo.lastUpdate()))
+        aspStatus.value = if (extra != null) "$base • $extra" else base
+    }
+
+    fun setAspPreset(list: List<String>) { aspCountries.value = list.joinToString(",") }
+
+    fun downloadAirspace() {
+        if (aspBusy.value) return
+        val list = aspCountries.value.split(',', ' ', ';').map { it.trim().uppercase() }.filter { it.length == 2 }.distinct()
+        prefs.edit().putString("aspCountries", list.joinToString(",")).apply()
+        viewModelScope.launch {
+            aspBusy.value = true
+            var err: String? = null
+            try {
+                aspRepo.download(list) { msg -> aspStatus.value = msg; if (msg.startsWith("Błędy")) err = msg }
+                aspStatus.value = "Wczytywanie stref…"
+                areas.value = aspRepo.loadAll()
+            } catch (e: Exception) {
+                err = e.message ?: e.javaClass.simpleName
+            } finally {
+                aspBusy.value = false
+                updateAspStatus(err)
+            }
+        }
+    }
+
+    fun setShowAreas(v: Boolean) { showAreas.value = v; prefs.edit().putBoolean("showAreas", v).apply() }
+
+    fun toggleAreaCat(c: AspCategory) {
+        val s = areaCats.value.toMutableSet()
+        if (!s.add(c)) s.remove(c)
+        areaCats.value = s
+        prefs.edit().putStringSet("areaCats", s.map { it.name }.toSet()).apply()
+    }
+
+    /** Strefy widoczne wg włączonych grup i limitu dolnej granicy. */
+    fun visibleAreas(all: List<AirspaceArea>, cats: Set<AspCategory>, maxFt: Int): List<AirspaceArea> =
+        all.filter { it.category in cats && it.lowerFt < maxFt }
 
     // ---------- ADF ----------
 

@@ -39,10 +39,13 @@ fun DbScreen(vm: NavViewModel) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         ZonesSection(vm)
-        Box(Modifier.fillMaxWidth().background(PanelBg, RoundedCornerShape(12.dp)).padding(12.dp)) {
+        AirspaceSection(vm)
+        CollapsibleCard(
+            "Lotniska i pomoce nawigacyjne",
+            "Lotniska: ${counts.first} • VOR/DME/NDB: ${counts.second}",
+            startOpen = counts.first + counts.second == 0
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Baza danych", fontWeight = FontWeight.Bold, color = Amber)
-                Text("Lotniska: ${counts.first}   •   VOR/DME/NDB: ${counts.second}   •   Własne lądowiska: ${counts.third}")
                 OutlinedTextField(
                     countries, { vm.countries.value = it.uppercase() }, singleLine = true,
                     label = { Text("Kraje (kody ISO, np. PL,DE,CZ,SK,LT)") }, modifier = Modifier.fillMaxWidth()
@@ -63,9 +66,8 @@ fun DbScreen(vm: NavViewModel) {
             }
         }
 
-        Box(Modifier.fillMaxWidth().background(PanelBg, RoundedCornerShape(12.dp)).padding(12.dp)) {
+        CollapsibleCard("Własne lądowiska (UL, trawiaste, prywatne)", "Zapisane: ${sites.size}") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Własne lądowiska (UL, trawiaste, prywatne)", fontWeight = FontWeight.Bold, color = Amber)
                 OutlinedButton(onClick = { picker.launch(arrayOf("text/*", "text/csv", "application/octet-stream")) }, enabled = !busy) {
                     Text("Importuj plik CSV")
                 }
@@ -76,7 +78,9 @@ fun DbScreen(vm: NavViewModel) {
                 HorizontalDivider(color = Color(0xFF1E2E40))
                 AddSiteForm(vm, pos?.lat, pos?.lon)
                 HorizontalDivider(color = Color(0xFF1E2E40))
-                sites.forEach { wp ->
+                var sitesOpen by remember { mutableStateOf(false) }
+                ExpandRow("Lista lądowisk (${sites.size})", sitesOpen) { sitesOpen = !sitesOpen }
+                if (sitesOpen) sites.forEach { wp ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("${wp.ident}  ${wp.name}", fontWeight = FontWeight.Bold, fontSize = 14.sp)

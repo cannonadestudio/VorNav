@@ -51,6 +51,7 @@ fun NavScreen(vm: NavViewModel) {
         StatusBar(pos, gps)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ZoneAlertBanner(vm)
+            AirspaceHereLine(vm)
             RoutePanel(vm, pos)
             DirectPanel(vm, pos)
             for (i in 0..1) NavPanel(i, vm, pos, settings) { tuneSlot = i }
