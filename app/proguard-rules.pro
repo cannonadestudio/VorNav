@@ -1,0 +1,1 @@
+# brak specjalnych reguł

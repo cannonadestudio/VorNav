@@ -1,0 +1,80 @@
+# VOR Nav — nawigacja VOR/DME na Androida
+
+Aplikacja pomocnicza dla pilota VFR (samoloty i UL). Łączy:
+
+- **Wirtualne odbiorniki NAV1 i NAV2 (VOR/DME).** Strojenie częstotliwością (np. `114.90`) albo identyfikatorem (np. `WAR`). Aplikacja pokazuje:
+  - wskaźnik CDI z OBS i flagą TO/FROM,
+  - radial QDR i kurs do stacji QDM,
+  - odległość DME (skośną, z uwzględnieniem wysokości), prędkość względem stacji i czas do stacji.
+  - Działa flaga OFF poza zasięgiem radiowym, liczonym z horyzontu i klasy mocy stacji.
+- **Odbiornik ADF (NDB).** Strojenie częstotliwością w kHz (np. `375`) albo identyfikatorem. Wskaźnik RMI/ADF pokazuje:
+  - kąt kursowy radiostacji (RB),
+  - QDM i QDR,
+  - odległość (z DME dla NDB-DME) i czas do stacji.
+  - Najdokładniej działa z kursem HDG wpisanym z żyrobusoli. Bez niego używa TRK z GPS, który przy wietrze różni się o kąt znoszenia.
+  - Fix z przecięcia namiaru NDB i radialu VOR, linia namiaru NDB na mapie.
+- **Direct-To** do dowolnego lotniska, lądowiska lub pomocy nawigacyjnej. Pokazuje BRG, DIST, ETE, ETA i strzałkę skrętu.
+- **Bazę lotnisk i pomocy nawigacyjnych** pobieraną z OurAirports, filtrowaną po krajach i działającą offline. Do tego **własne lądowiska** (UL, trawiaste) dodawane ręcznie albo z pliku CSV.
+- **Mapę** (OpenStreetMap / osmdroid). Pokazuje VOR, DME, NDB, lotniska, samolot, linię D→ i linie kursów OBS z NAV1/NAV2. Dotknięcie punktu otwiera akcje.
+- **Pozycję z GPS z korektą:**
+  - fix z odczytu radial + DME z prawdziwego przyrządu w samolocie,
+  - fix z przecięcia dwóch radiali,
+  - „Jestem nad” punktem,
+  - ręczne współrzędne.
+  - Korekta działa jako przesunięcie dodawane do kolejnych odczytów GPS. Przy utracie GPS aplikacja przechodzi na zliczanie drogi (DR).
+- **Wysokość z wysokościomierza** do dokładniejszego DME oraz **tryb symulacji** do ćwiczeń na ziemi.
+
+## Ważne: jak działa „VOR/DME” w telefonie
+
+Telefon nie ma odbiornika VHF NAV 108–118 MHz, więc **nie odbiera sygnału VOR**. Nie może też pracować z DME, bo DME to układ zapytanie–odpowiedź, który wymaga nadajnika w samolocie.
+
+Wskazania są więc **liczone** z pozycji GPS i współrzędnych stacji z bazy. Ta sama geometria daje te same liczby, co prawdziwy przyrząd: radial, DME, odchylenie CDI, TO/FROM.
+
+Radiale są liczone względem deklinacji, do której skalibrowano stację (`slaved variation` z bazy). Gdy jej brak, aplikacja używa bieżącej deklinacji z modelu WMM wbudowanego w Androida. Przełącznik jest w zakładce Korekta.
+
+Połączenie z prawdziwym odbiornikiem odbywa się przez **korektę pozycji**: wpisujesz radial i DME odczytane z przyrządu w samolocie, a aplikacja przesuwa pozycję GPS.
+
+Jeżeli kiedyś zechcesz czytać prawdziwy odbiornik automatycznie, potrzebny jest sprzęt z wyjściem danych, np. NAV/COM z wyjściem RS-232/ARINC 429 i konwerterem na Bluetooth, albo odbiornik SDR (RTL-SDR przez USB-OTG) z demodulacją VOR. To jest kolejny etap projektu.
+
+## Budowanie
+
+1. Zainstaluj **Android Studio** (Ladybug lub nowsze).
+2. *File → Open* → wskaż folder `VorNav`. Studio samo pobierze Gradle 8.14 i zależności.
+   - Jeśli zapyta o brak `gradlew`, zgódź się na utworzenie wrappera albo uruchom `gradle wrapper`.
+3. Podłącz telefon z włączonym debugowaniem USB → **Run ▶**.
+   - Wersja do instalacji: *Build → Build APK(s)*. Na Google Play: *Build → Generate Signed App Bundle*.
+
+Wymagania: Android 8.0+ (API 26), GPS.
+
+## Pierwsze uruchomienie
+
+1. Zezwól na lokalizację.
+2. Zakładka **Baza**: wpisz kraje (domyślnie `PL,DE,CZ,SK,LT`) → **Pobierz bazę**. Pobranie wymaga internetu i trwa ok. 1 minuty. Potem baza działa offline.
+3. Zakładka **NAV** → **Strój** → wpisz `114.90` lub ident stacji. Kręć OBS przyciskami ±1/±10. **CDI→TO** centruje wskazówkę na kurs do stacji.
+4. Lądowiska UL: **Baza → Dodaj lądowisko** albo **Importuj plik CSV** (wzór w `przyklad_ladowiska.csv`):
+   ```
+   IDENT;Nazwa;szerokość;długość;elewacja_ft
+   EPXY;Lądowisko;52.1234;20.5678;350
+   EPXY;Lądowisko;N52°07'24";E020°34'04";350
+   ```
+5. Do ćwiczeń w domu: **Korekta → Symulacja**. Ustaw GS i TRK, a samolot poleci wirtualnie.
+
+## Struktura kodu
+
+| Plik | Co robi |
+|---|---|
+| `nav/Geo.kt` | odległości, kursy, punkt docelowy, przecięcie radiali, deklinacja (WMM) |
+| `nav/AdfReceiver.kt` | wirtualny ADF: QDM/QDR, kąt kursowy, zasięg NDB |
+| `nav/VorReceiver.kt` | wirtualny odbiornik: radial, CDI, TO/FROM, DME skośne, zasięg, fixy |
+| `data/NavDb.kt` | baza SQLite: wyszukiwanie, najbliższe, częstotliwości, własne lądowiska |
+| `data/Importer.kt` | import OurAirports (CSV RFC 4180) i własnych CSV, parser współrzędnych DMS |
+| `loc/PositionEngine.kt` | GPS, korekta pozycji, DR przy utracie GPS, symulacja |
+| `ui/*` | ekrany Compose: Mapa, NAV, Szukaj, Korekta, Baza; wskaźnik CDI |
+
+## Przed publikacją w Google Play
+
+- Kafelki OSM: polityka OpenStreetMap nie pozwala na intensywne użycie ich serwera w aplikacjach publicznych. Na produkcję podepnij własny serwer kafelków lub dostawcę (np. MapTiler). Mapy lotnicze VFR są dostępne np. z openflightmaps.org (sprawdź licencję).
+- Dodaj ekran z zastrzeżeniem, że aplikacja nie jest certyfikowanym urządzeniem nawigacyjnym.
+- Dane OurAirports bywają niekompletne. W Polsce część NDB jest już wycofana, a baza może je wciąż zawierać. Lądowiska UL i częstotliwości weryfikuj w AIP Polska i VFR Polska.
+
+**Zastrzeżenie:** aplikacja ma charakter pomocniczy i nie zastępuje certyfikowanych przyrządów, aktualnych map ani AIP.
