@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,6 +43,17 @@ class NavOverlay(private val onTap: (Waypoint) -> Unit) : Overlay() {
     var points: List<Waypoint> = emptyList()
     var aircraft: Position? = null
     var direct: Waypoint? = null
+    /** Strefy AUP/UUP: (strefa, aktywna teraz?, etykieta wysokości). */
+    var zones: List<Triple<pl.pilot.vornav.data.Zone, Boolean, String>> = emptyList()
+    private val zoneFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val zoneText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 26f; textAlign = Paint.Align.CENTER; isFakeBoldText = true
+        setShadowLayer(4f, 0f, 0f, android.graphics.Color.WHITE)
+    }
+
+    /** Punkty trasy i indeks aktywnego odcinka (-1 = trasa nieaktywna). */
+    var route: List<Waypoint> = emptyList()
+    var activeLeg: Int = -1
     /** NDB nastrojona w ADF — rysowana linia namiaru od samolotu */
     var adf: Waypoint? = null
     /** stacja + kurs rzeczywisty radialu OBS (kolor wg NAV1/NAV2) */
@@ -72,6 +84,43 @@ class NavOverlay(private val onTap: (Waypoint) -> Unit) : Overlay() {
             stroke.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f, 12f), 0f)
             c.drawLine(pt.x.toFloat(), pt.y.toFloat(), pt2.x.toFloat(), pt2.y.toFloat(), stroke)
             stroke.pathEffect = null
+        }
+
+        for ((z, active, label) in zones) {
+            val col = if (active) 0xFFE53935.toInt() else 0xFFFF9800.toInt()
+            for (r in z.rings) {
+                val path = Path()
+                var i = 0
+                while (i < r.size - 1) {
+                    pj.toPixels(GeoPoint(r[i], r[i + 1]), pt)
+                    if (i == 0) path.moveTo(pt.x.toFloat(), pt.y.toFloat()) else path.lineTo(pt.x.toFloat(), pt.y.toFloat())
+                    i += 2
+                }
+                path.close()
+                zoneFill.color = (col and 0x00FFFFFF) or (if (active) 0x44000000 else 0x22000000)
+                c.drawPath(path, zoneFill)
+                stroke.pathEffect = if (active) null else android.graphics.DashPathEffect(floatArrayOf(14f, 10f), 0f)
+                stroke.color = col; stroke.strokeWidth = if (active) 4f else 3f
+                c.drawPath(path, stroke)
+                stroke.pathEffect = null
+            }
+            if (zoom >= 8) {
+                pj.toPixels(GeoPoint(z.centerLat, z.centerLon), pt)
+                zoneText.color = if (active) 0xFFB71C1C.toInt() else 0xFFE65100.toInt()
+                c.drawText(z.designator, pt.x.toFloat(), pt.y.toFloat(), zoneText)
+                if (zoom >= 9) c.drawText(label, pt.x.toFloat(), pt.y + 28f, zoneText)
+            }
+        }
+
+        if (route.size >= 2) {
+            for (k in 0 until route.size - 1) {
+                pj.toPixels(GeoPoint(route[k].lat, route[k].lon), pt)
+                pj.toPixels(GeoPoint(route[k + 1].lat, route[k + 1].lon), pt2)
+                stroke.pathEffect = null
+                stroke.color = if (k == activeLeg) 0xFFE040FB.toInt() else 0xFF7B1FA2.toInt()
+                stroke.strokeWidth = if (k == activeLeg) 9f else 6f
+                c.drawLine(pt.x.toFloat(), pt.y.toFloat(), pt2.x.toFloat(), pt2.y.toFloat(), stroke)
+            }
         }
 
         for (wp in points) {
@@ -154,6 +203,12 @@ fun MapScreen(vm: NavViewModel) {
     val gps by vm.gpsStatus.collectAsState()
     val direct by vm.direct.collectAsState()
     val adfSt by vm.adf.collectAsState()
+    val routePts by vm.route.collectAsState()
+    val routeOn by vm.routeActive.collectAsState()
+    val legIdx by vm.activeLeg.collectAsState()
+    val allZones by vm.zones.collectAsState()
+    val showZones by vm.showZones.collectAsState()
+    val zoneMaxFt by vm.zoneMaxFt.collectAsState()
     val nav1 by vm.nav[0].collectAsState()
     val nav2 by vm.nav[1].collectAsState()
     val settings by vm.settings.collectAsState()
@@ -195,6 +250,26 @@ fun MapScreen(vm: NavViewModel) {
         }
     }
 
+    // strefy: aktywne teraz (czerwone) i później dziś (pomarańczowe, przerywane); odświeżane co minutę
+    LaunchedEffect(allZones, showZones, zoneMaxFt) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            overlay.zones = if (!showZones) emptyList() else vm.visibleZones(allZones, zoneMaxFt).mapNotNull { z ->
+                val act = z.activeAt(now)
+                val r = act ?: z.nextFrom(now)?.takeIf { it.start - now < 12 * 3600_000L } ?: return@mapNotNull null
+                Triple(z, act != null, pl.pilot.vornav.nav.ZoneAlerts.altText(r))
+            }
+            mapView.invalidate()
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
+
+    LaunchedEffect(routePts, routeOn, legIdx) {
+        overlay.route = routePts
+        overlay.activeLeg = if (routeOn) legIdx else -1
+        mapView.invalidate()
+    }
+
     LaunchedEffect(pos, direct, nav1, nav2, follow, settings, adfSt) {
         overlay.aircraft = pos
         overlay.direct = direct
@@ -217,9 +292,14 @@ fun MapScreen(vm: NavViewModel) {
                     onClick = { follow = !follow },
                     containerColor = if (follow) NavGreen else Color(0xFF37474F)
                 ) { Icon(Icons.Filled.MyLocation, "Śledź samolot") }
+                SmallFloatingActionButton(
+                    onClick = { vm.setShowZones(!showZones) },
+                    containerColor = if (showZones) ZoneRed else Color(0xFF37474F)
+                ) { Icon(Icons.Filled.Layers, "Strefy") }
                 SmallFloatingActionButton(onClick = { mapView.controller.zoomIn() }) { Text("+") }
                 SmallFloatingActionButton(onClick = { mapView.controller.zoomOut() }) { Text("−") }
             }
+            Box(Modifier.align(Alignment.TopCenter).padding(start = 8.dp, end = 64.dp, top = 64.dp)) { ZoneAlertBanner(vm) }
             if (direct != null && pos != null) {
                 val bd = brgDist(pos, direct!!)
                 Row(

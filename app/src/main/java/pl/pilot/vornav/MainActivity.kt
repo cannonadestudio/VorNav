@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import org.osmdroid.config.Configuration
 import pl.pilot.vornav.ui.*
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
 private enum class Tab(val label: String, val icon: ImageVector) {
     MAP("Mapa", Icons.Filled.Map),
     NAV("NAV", Icons.Filled.Explore),
+    ROUTE("Trasa", Icons.Filled.Timeline),
     SEARCH("Szukaj", Icons.Filled.Search),
     FIX("Korekta", Icons.Filled.GpsFixed),
     DB("Baza", Icons.Filled.Storage),
@@ -85,7 +87,8 @@ private fun App(vm: NavViewModel, permissionGranted: Boolean) {
                 Tab.entries.forEach { t ->
                     NavigationBarItem(
                         selected = tab == t, onClick = { tab = t },
-                        icon = { Icon(t.icon, t.label) }, label = { Text(t.label) }
+                        icon = { Icon(t.icon, t.label) },
+                        label = { Text(t.label, fontSize = 10.sp, maxLines = 1) }
                     )
                 }
             }
@@ -95,6 +98,7 @@ private fun App(vm: NavViewModel, permissionGranted: Boolean) {
             when (tab) {
                 Tab.MAP -> MapScreen(vm)
                 Tab.NAV -> NavScreen(vm)
+                Tab.ROUTE -> RouteScreen(vm)
                 Tab.SEARCH -> SearchScreen(vm)
                 Tab.FIX -> FixScreen(vm)
                 Tab.DB -> DbScreen(vm)

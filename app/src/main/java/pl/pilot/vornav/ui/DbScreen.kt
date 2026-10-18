@@ -38,6 +38,7 @@ fun DbScreen(vm: NavViewModel) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ZonesSection(vm)
         Box(Modifier.fillMaxWidth().background(PanelBg, RoundedCornerShape(12.dp)).padding(12.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Baza danych", fontWeight = FontWeight.Bold, color = Amber)

@@ -105,6 +105,12 @@ fun WaypointActions(wp: Waypoint, vm: NavViewModel, onDone: () -> Unit) {
             if (wp.isAdfTunable) {
                 OutlinedButton(onClick = { vm.tuneAdf(wp); onDone() }) { Text("ADF") }
             }
+            OutlinedButton(onClick = {
+                val n = vm.route.value.size
+                when (n) { 0 -> vm.setRouteFrom(wp); 1 -> vm.setRouteTo(wp); else -> vm.addVia(wp) }
+                vm.toast.value = "${wp.ident} dodany do trasy"
+                onDone()
+            }) { Text("+ Trasa") }
             OutlinedButton(onClick = { confirmOverfly = true }) { Text("Jestem nad") }
         }
     }
@@ -117,6 +123,37 @@ fun WaypointActions(wp: Waypoint, vm: NavViewModel, onDone: () -> Unit) {
             dismissButton = { TextButton(onClick = { confirmOverfly = false }) { Text("Anuluj") } }
         )
     }
+}
+
+/** Wybór punktu z bazy (lotnisko, lądowisko, VOR, NDB) — wyszukiwanie po nazwie/ident. */
+@Composable
+fun WaypointPickerDialog(title: String, vm: NavViewModel, onPick: (Waypoint) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<Waypoint>>(emptyList()) }
+    val pos by vm.position.collectAsState()
+    LaunchedEffect(text) {
+        kotlinx.coroutines.delay(150)
+        results = if (text.isBlank()) vm.nearest() else vm.search(text)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it }, singleLine = true,
+                    label = { Text("ICAO, nazwa, miejscowość, VOR…") }, modifier = Modifier.fillMaxWidth()
+                )
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    results.take(60).forEach { wp ->
+                        WaypointRow(wp, pos) { onPick(wp); onDismiss() }
+                        HorizontalDivider(color = Color(0xFF1E2E40))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } }
+    )
 }
 
 const val ADF_SLOT = 2

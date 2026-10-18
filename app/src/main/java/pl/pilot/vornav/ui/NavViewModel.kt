@@ -11,12 +11,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import pl.pilot.vornav.data.Importer
+import pl.pilot.vornav.data.AirspaceRepo
+import pl.pilot.vornav.data.Zone
+import kotlinx.coroutines.delay
 import pl.pilot.vornav.data.NavDb
 import pl.pilot.vornav.data.Waypoint
 import pl.pilot.vornav.loc.PositionEngine
 import pl.pilot.vornav.nav.Geo
 import pl.pilot.vornav.nav.NavSettings
 import pl.pilot.vornav.nav.VorReceiver
+import pl.pilot.vornav.nav.LegPlan
+import pl.pilot.vornav.nav.RoutePlanner
+import kotlin.math.cos
+import kotlin.math.max
 
 data class NavSlot(val station: Waypoint? = null, val obs: Double = 0.0)
 
@@ -54,6 +61,27 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
     private val _userSites = MutableStateFlow<List<Waypoint>>(emptyList())
     val userSites: StateFlow<List<Waypoint>> = _userSites
 
+    // ---------- trasa ----------
+    /** Punkty trasy: [od, ...pośrednie..., do]. */
+    val route = MutableStateFlow<List<Waypoint>>(emptyList())
+    private val _legs = MutableStateFlow<List<LegPlan>>(emptyList())
+    val legs: StateFlow<List<LegPlan>> = _legs
+    val routeActive = MutableStateFlow(false)
+    val activeLeg = MutableStateFlow(0)
+    val cruiseKt = MutableStateFlow(prefs.getFloat("cruiseKt", 90f).toDouble())
+    val maxLegNm = MutableStateFlow(prefs.getFloat("maxLegNm", 60f).toDouble())
+
+    val cruiseAltFt = MutableStateFlow(prefs.getFloat("cruiseAltFt", 2500f).toDouble())
+
+    // ---------- strefy AUP/UUP ----------
+    private val airspace = AirspaceRepo(app)
+    val zones = MutableStateFlow<List<Zone>>(emptyList())
+    val zonesStatus = MutableStateFlow("")
+    val zonesBusy = MutableStateFlow(false)
+    val showZones = MutableStateFlow(prefs.getBoolean("showZones", true))
+    /** Pokazuj tylko strefy, których dolna granica jest poniżej tej wysokości (ft). */
+    val zoneMaxFt = MutableStateFlow(prefs.getInt("zoneMaxFt", 9500))
+
     /** Komunikat jednorazowy (snackbar). */
     val toast = MutableStateFlow<String?>(null)
 
@@ -66,8 +94,25 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 direct.value = prefs.getString("direct_key", null)?.let { db.byKey(it) }
                 adf.value = prefs.getString("adf_key", null)?.let { db.byKey(it) }
+                route.value = prefs.getString("route_keys", "").orEmpty()
+                    .split(",").filter { it.isNotBlank() }.mapNotNull { db.byKey(it) }
             }
+            replan()
             refreshCounts()
+        }
+        // strefy: najpierw z pamięci, potem odświeżanie co 30 min (AUP publikowany codziennie, UUP w ciągu dnia)
+        viewModelScope.launch {
+            zones.value = airspace.loadCached()
+            updateZonesStatus(null)
+            while (true) {
+                val age = System.currentTimeMillis() - (airspace.cacheInfo()?.first ?: 0L)
+                if (age > 30 * 60_000L) refreshZonesNow()
+                delay(5 * 60_000L)
+            }
+        }
+        // automatyczne przełączanie odcinków trasy
+        viewModelScope.launch {
+            position.collect { p -> if (p != null && routeActive.value) autoSequence(p) }
         }
     }
 
@@ -114,6 +159,154 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
         val list = db.byFrequency(khz).filter { it.isTunable }
         if (pos == null) list else list.sortedBy { Geo.distanceNm(pos.lat, pos.lon, it.lat, it.lon) }
     }
+
+    // ---------- trasa (od–do, nawigacja po radialach) ----------
+
+    private suspend fun vorsAround(points: List<Waypoint>, marginNm: Double = 100.0): List<Waypoint> = withContext(Dispatchers.IO) {
+        if (points.isEmpty()) return@withContext emptyList()
+        val latMin = points.minOf { it.lat } - marginNm / 60.0
+        val latMax = points.maxOf { it.lat } + marginNm / 60.0
+        val k = 60.0 * max(0.2, cos(Math.toRadians((latMin + latMax) / 2)))
+        db.vorsInBox(latMin, latMax, points.minOf { it.lon } - marginNm / k, points.maxOf { it.lon } + marginNm / k)
+    }
+
+    private fun saveRoute() {
+        prefs.edit().putString("route_keys", route.value.joinToString(",") { it.key }).apply()
+    }
+
+    private fun replan() {
+        val pts = route.value
+        viewModelScope.launch {
+            val vors = vorsAround(pts)
+            _legs.value = withContext(Dispatchers.Default) { RoutePlanner.planLegs(pts, vors, settings.value) }
+            if (activeLeg.value >= _legs.value.size) activeLeg.value = 0
+        }
+    }
+
+    private fun setRoute(pts: List<Waypoint>) {
+        route.value = pts; saveRoute(); replan()
+    }
+
+    fun setRouteFrom(wp: Waypoint) {
+        val r = route.value
+        setRoute(if (r.isEmpty()) listOf(wp) else listOf(wp) + r.drop(1))
+    }
+
+    fun setRouteTo(wp: Waypoint) {
+        val r = route.value
+        setRoute(when (r.size) { 0 -> listOf(wp); 1 -> r + wp; else -> r.dropLast(1) + wp })
+    }
+
+    /** Dodaje punkt pośredni przed celem. */
+    fun addVia(wp: Waypoint) {
+        val r = route.value
+        setRoute(if (r.size < 2) r + wp else r.dropLast(1) + wp + r.last())
+    }
+
+    fun removeRoutePoint(i: Int) {
+        setRoute(route.value.filterIndexed { k, _ -> k != i })
+    }
+
+    fun moveRoutePoint(i: Int, delta: Int) {
+        val r = route.value.toMutableList(); val j = i + delta
+        if (i !in r.indices || j !in r.indices) return
+        val t = r[i]; r[i] = r[j]; r[j] = t
+        setRoute(r)
+    }
+
+    fun reverseRoute() = setRoute(route.value.reversed())
+
+    fun clearRoute() { stopRoute(); setRoute(emptyList()) }
+
+    fun setCruise(kt: Double) { cruiseKt.value = kt; prefs.edit().putFloat("cruiseKt", kt.toFloat()).apply() }
+    fun setMaxLeg(nm: Double) { maxLegNm.value = nm; prefs.edit().putFloat("maxLegNm", nm.toFloat()).apply() }
+
+    /** Wyznacza trasę od pierwszego do ostatniego punktu przez VOR-y. */
+    fun suggestVorRoute() {
+        val r = route.value
+        if (r.size < 2) { toast.value = "Wybierz lotnisko startu i celu"; return }
+        viewModelScope.launch {
+            val vors = vorsAround(listOf(r.first(), r.last()), 80.0)
+            val path = withContext(Dispatchers.Default) { RoutePlanner.suggestViaVor(r.first(), r.last(), vors, maxLegNm.value) }
+            if (path == null) {
+                toast.value = "Nie znalazłem trasy przez VOR z odcinkami ≤ ${maxLegNm.value.toInt()} NM — zwiększ limit"
+            } else {
+                setRoute(path)
+                toast.value = "Trasa przez ${path.size - 2} VOR"
+            }
+        }
+    }
+
+    fun startRoute(fromLeg: Int = 0) {
+        if (_legs.value.isEmpty()) { toast.value = "Trasa musi mieć co najmniej dwa punkty"; return }
+        routeActive.value = true
+        activateLeg(fromLeg.coerceIn(0, _legs.value.size - 1), announce = true)
+    }
+
+    fun stopRoute() { routeActive.value = false }
+
+    fun nextLeg() = activateLeg((activeLeg.value + 1).coerceAtMost(_legs.value.size - 1), true)
+    fun prevLeg() = activateLeg((activeLeg.value - 1).coerceAtLeast(0), true)
+
+    /** Ustawia odcinek: Direct-To na koniec odcinka, NAV1 na stację odcinka z właściwym OBS. */
+    private fun activateLeg(i: Int, announce: Boolean) {
+        val leg = _legs.value.getOrNull(i) ?: return
+        activeLeg.value = i
+        direct.value = leg.to
+        prefs.edit().putString("direct_key", leg.to.key).apply()
+        val st = leg.navStation; val obs = leg.obs
+        if (st != null && obs != null) {
+            nav[0].value = NavSlot(st, Geo.norm360(Math.round(obs).toDouble()))
+            saveNav(0)
+        }
+        if (announce) toast.value = "Odcinek ${i + 1}/${_legs.value.size}: ${leg.from.ident}→${leg.to.ident}" +
+            (if (st != null && obs != null) " • NAV1 ${st.ident} OBS ${RoutePlanner.fmt3(obs)}" else "")
+    }
+
+    private fun autoSequence(p: pl.pilot.vornav.loc.Position) {
+        val legs = _legs.value
+        val i = activeLeg.value
+        val leg = legs.getOrNull(i) ?: return
+        if (i >= legs.size - 1) return
+        val toGo = Geo.distanceNm(p.lat, p.lon, leg.to.lat, leg.to.lon)
+        val (_, along) = RoutePlanner.crossTrack(leg, p)
+        if (toGo < 0.7 || along > leg.distNm) activateLeg(i + 1, true)
+    }
+
+    // ---------- strefy ----------
+
+    private fun updateZonesStatus(error: String?) {
+        val info = airspace.cacheInfo()
+        val now = System.currentTimeMillis()
+        val active = zones.value.count { it.activeAt(now) != null }
+        val base = if (info == null) "Brak pobranych stref"
+        else "${info.second}: ${zones.value.size} stref (aktywnych teraz: $active), pobrano " +
+            java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(info.first))
+        zonesStatus.value = if (error != null) "$base • błąd odświeżania: $error" else base
+    }
+
+    private suspend fun refreshZonesNow() {
+        if (zonesBusy.value) return
+        zonesBusy.value = true
+        try {
+            zones.value = airspace.download().first
+            updateZonesStatus(null)
+        } catch (e: Exception) {
+            updateZonesStatus(e.message ?: e.javaClass.simpleName)
+        } finally {
+            zonesBusy.value = false
+        }
+    }
+
+    fun refreshZones() { viewModelScope.launch { refreshZonesNow() } }
+
+    fun setShowZones(v: Boolean) { showZones.value = v; prefs.edit().putBoolean("showZones", v).apply() }
+    fun setZoneMaxFt(v: Int) { zoneMaxFt.value = v; prefs.edit().putInt("zoneMaxFt", v).apply() }
+    fun setCruiseAlt(v: Double) { cruiseAltFt.value = v; prefs.edit().putFloat("cruiseAltFt", v.toFloat()).apply() }
+
+    /** Strefy po filtrze wysokości (dolna granica poniżej limitu albo nieznana). */
+    fun visibleZones(all: List<Zone>, maxFt: Int): List<Zone> =
+        all.filter { z -> z.reservations.any { (it.lowerFt ?: 0) < maxFt } }
 
     // ---------- ADF ----------
 

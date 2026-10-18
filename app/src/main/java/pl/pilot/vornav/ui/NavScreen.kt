@@ -50,6 +50,8 @@ fun NavScreen(vm: NavViewModel) {
     Column(Modifier.fillMaxSize()) {
         StatusBar(pos, gps)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ZoneAlertBanner(vm)
+            RoutePanel(vm, pos)
             DirectPanel(vm, pos)
             for (i in 0..1) NavPanel(i, vm, pos, settings) { tuneSlot = i }
             AdfPanel(vm, pos, settings) { tuneSlot = ADF_SLOT }
@@ -111,6 +113,47 @@ private fun NavPanel(i: Int, vm: NavViewModel, pos: Position?, settings: NavSett
                 for (d in listOf(1, 10)) OutlinedButton(onClick = { vm.setObs(i, slot.obs + d) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+$d") }
             }
         }
+    }
+}
+
+/** Aktywny odcinek trasy: instrukcja radialowa, XTK, odległość do końca odcinka. */
+@Composable
+private fun RoutePanel(vm: NavViewModel, pos: Position?) {
+    val active by vm.routeActive.collectAsState()
+    val legs by vm.legs.collectAsState()
+    val idx by vm.activeLeg.collectAsState()
+    if (!active) return
+    val leg = legs.getOrNull(idx) ?: return
+    val xa = pos?.let { pl.pilot.vornav.nav.RoutePlanner.crossTrack(leg, it) }
+    val toGo = pos?.let { Geo.distanceNm(it.lat, it.lon, leg.to.lat, leg.to.lon) }
+    Column(
+        Modifier.fillMaxWidth().background(PanelBg, RoundedCornerShape(12.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("TRASA ${idx + 1}/${legs.size}", color = Magenta, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Spacer(Modifier.width(8.dp))
+            Text("${leg.from.ident} → ${leg.to.ident}", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { vm.prevLeg() }, enabled = idx > 0, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("◀") }
+            TextButton(onClick = { vm.nextLeg() }, enabled = idx < legs.size - 1, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("▶") }
+        }
+        Text(leg.navText, fontSize = 13.sp, color = if (leg.navStation != null) NavGreen else Color(0xFFFF7043))
+        Row {
+            Readout("KURS M", "${pl.pilot.vornav.nav.RoutePlanner.fmt3(leg.courseMag)}°", Modifier.weight(1f))
+            val xtk = xa?.first
+            Readout(
+                "XTK NM",
+                xtk?.let { (if (kotlin.math.abs(it) < 0.05) "" else if (it > 0) "P " else "L ") + fmtNm(kotlin.math.abs(it)) } ?: "--",
+                Modifier.weight(1f),
+                color = if (xtk != null && kotlin.math.abs(xtk) > 1.0) Amber else NavGreen
+            )
+            Readout("DO PKT NM", fmtNm(toGo), Modifier.weight(1f))
+        }
+        if (xa != null && kotlin.math.abs(xa.first) > 0.3) Text(
+            if (xa.first > 0) "Jesteś na prawo od linii — koryguj w lewo" else "Jesteś na lewo od linii — koryguj w prawo",
+            fontSize = 11.sp, color = Amber
+        )
+        leg.checkpoint?.let { Text("Kontrola: $it", fontSize = 11.sp, color = Color(0xFFB0BEC5)) }
     }
 }
 

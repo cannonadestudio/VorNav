@@ -122,6 +122,13 @@ class NavDb(ctx: Context) : SQLiteOpenHelper(ctx, "navdb.sqlite", null, 1) {
             .map { it.first }
     }
 
+    /** Wszystkie stacje VOR (VOR, VOR-DME, VORTAC) w prostokącie — do planowania tras. */
+    fun vorsInBox(latMin: Double, latMax: Double, lonMin: Double, lonMax: Double): List<Waypoint> =
+        query(
+            "SELECT $naCols FROM navaids WHERE type IN ('VOR','VOR-DME','VORTAC') AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?",
+            arrayOf(latMin.toString(), latMax.toString(), lonMin.toString(), lonMax.toString()), ::navaid
+        )
+
     fun byFrequency(freqKhz: Int): List<Waypoint> =
         query("SELECT $naCols FROM navaids WHERE freq_khz=?", arrayOf(freqKhz.toString()), ::navaid)
 

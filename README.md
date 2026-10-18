@@ -13,6 +13,15 @@ Aplikacja pomocnicza dla pilota VFR (samoloty i UL). Łączy:
   - odległość (z DME dla NDB-DME) i czas do stacji.
   - Najdokładniej działa z kursem HDG wpisanym z żyrobusoli. Bez niego używa TRK z GPS, który przy wietrze różni się o kąt znoszenia.
   - Fix z przecięcia namiaru NDB i radialu VOR, linia namiaru NDB na mapie.
+- **Trasa od–do po radialach.** Wybierasz lotnisko startu i celu, a przycisk „Wyznacz przez VOR” buduje najkrótszą trasę, w której każdy odcinek zaczyna się lub kończy na VOR.
+  - Każdy odcinek dostaje kurs, odległość, czas, stację, tryb TO/FROM i OBS oraz punkt kontrolny (radial/DME lub przecięcie radiali).
+  - Możesz dodawać, przesuwać i usuwać punkty pośrednie.
+  - Po „Start” NAV1 stroi się sam na stację odcinka, D→ wskazuje koniec odcinka, widać XTK, a odcinki przełączają się automatycznie.
+- **Aktywne strefy z AUP/UUP (PAŻP).** Strefy pobierane z airspace.pansa.pl przy starcie i co 30 minut, zapisywane do użytku offline.
+  - Na mapie: czerwone = aktywne teraz, pomarańczowe przerywane = aktywne później w ciągu 12 h, z oznaczeniem i wysokościami. Przycisk warstw włącza i wyłącza strefy.
+  - Ostrzeżenie w zakładce NAV i na mapie, gdy jesteś w aktywnej strefie albo lecisz na nią w ciągu 5 NM, z uwzględnieniem wysokości.
+  - Sprawdzanie trasy: lista stref przecinanych przez trasę na planowanej wysokości.
+  - Lista stref w zakładce Baza, z filtrem dolnej granicy (domyślnie poniżej 9500 ft).
 - **Direct-To** do dowolnego lotniska, lądowiska lub pomocy nawigacyjnej. Pokazuje BRG, DIST, ETE, ETA i strzałkę skrętu.
 - **Bazę lotnisk i pomocy nawigacyjnych** pobieraną z OurAirports, filtrowaną po krajach i działającą offline. Do tego **własne lądowiska** (UL, trawiaste) dodawane ręcznie albo z pliku CSV.
 - **Mapę** (OpenStreetMap / osmdroid). Pokazuje VOR, DME, NDB, lotniska, samolot, linię D→ i linie kursów OBS z NAV1/NAV2. Dotknięcie punktu otwiera akcje.
@@ -65,6 +74,9 @@ Wymagania: Android 8.0+ (API 26), GPS.
 |---|---|
 | `nav/Geo.kt` | odległości, kursy, punkt docelowy, przecięcie radiali, deklinacja (WMM) |
 | `nav/AdfReceiver.kt` | wirtualny ADF: QDM/QDR, kąt kursowy, zasięg NDB |
+| `nav/RoutePlanner.kt` | trasa przez VOR (Dijkstra), instrukcje radialowe odcinków, XTK |
+| `data/Airspace.kt` | pobieranie i parsowanie AUP/UUP z airspace.pansa.pl, geometria stref |
+| `nav/ZoneAlerts.kt` | ostrzeżenia o strefach i konflikty trasy ze strefami |
 | `nav/VorReceiver.kt` | wirtualny odbiornik: radial, CDI, TO/FROM, DME skośne, zasięg, fixy |
 | `data/NavDb.kt` | baza SQLite: wyszukiwanie, najbliższe, częstotliwości, własne lądowiska |
 | `data/Importer.kt` | import OurAirports (CSV RFC 4180) i własnych CSV, parser współrzędnych DMS |
