@@ -27,6 +27,12 @@ Aplikacja pomocnicza dla pilota VFR (samoloty i UL). Łączy:
   - Dotknięcie pustego miejsca na mapie pokazuje wszystkie strefy w tym punkcie (statyczne i AUP).
   - W zakładce NAV linia „Przestrzeń w Twojej pozycji”.
   - Dane openAIP, licencja CC BY-NC 4.0 (użycie niekomercyjne, wymagane podanie źródła).
+- **Małe przyrządy na mapie** (przycisk z prędkościomierzem): NAV1/NAV2 z paskiem CDI, TO/FROM, OBS (−/+, dotknięcie OBS centruje na TO), QDM i DME oraz ADF z mini-RMI, QDM i odległością.
+- **Ostrzeżenia w locie z dźwiękiem i wibracją:**
+  - aktywne strefy AUP/UUP,
+  - strefy P (czerwone) oraz R i D z AIP (pomarańczowe, z przypomnieniem o sprawdzeniu aktywności),
+  - informacja o zbliżaniu się do granicy CTR/TMA/ATZ/RMZ.
+  - Wszystko w zasięgu 5 NM przed samolotem i z uwzględnieniem wysokości.
 - **Direct-To** do dowolnego lotniska, lądowiska lub pomocy nawigacyjnej. Pokazuje BRG, DIST, ETE, ETA i strzałkę skrętu.
 - **Bazę lotnisk i pomocy nawigacyjnych** pobieraną z OurAirports, filtrowaną po krajach i działającą offline. Do tego **własne lądowiska** (UL, trawiaste) dodawane ręcznie albo z pliku CSV.
 - **Mapę** (OpenStreetMap / osmdroid). Pokazuje VOR, DME, NDB, lotniska, samolot, linię D→ i linie kursów OBS z NAV1/NAV2. Dotknięcie punktu otwiera akcje.

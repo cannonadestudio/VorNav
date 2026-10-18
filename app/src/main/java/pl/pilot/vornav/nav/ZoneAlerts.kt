@@ -15,6 +15,15 @@ data class ZoneAlert(
     val minutes: Double?,
 )
 
+/** Ostrzeżenie do wyświetlenia: poziom 2 = czerwone, 1 = pomarańczowe, 0 = informacja. */
+data class AirAlert(
+    val key: String,
+    val title: String,
+    val detail: String,
+    val level: Int,
+    val distNm: Double,
+)
+
 data class RouteZoneConflict(
     val legIndex: Int,
     val zone: Zone,
@@ -87,5 +96,87 @@ object ZoneAlerts {
             }
         }
         return out.sortedWith(compareBy({ it.legIndex }, { it.res.start }))
+    }
+
+    private fun aheadPoints(pos: Position, lookAheadNm: Double): List<Pair<Double, Pair<Double, Double>>> {
+        val trk = pos.trackTrue ?: return emptyList()
+        if (pos.gsKt <= 20.0) return emptyList()
+        return generateSequence(0.5) { it + 0.5 }.takeWhile { it <= lookAheadNm }
+            .map { d -> d to Geo.destination(pos.lat, pos.lon, trk, d) }.toList()
+    }
+
+    /**
+     * Wszystkie ostrzeżenia: aktywne strefy z AUP/UUP oraz strefy z AIP (openAIP):
+     * P — zawsze czerwone/pomarańczowe, R i D — pomarańczowe (aktywność sprawdź w AUP),
+     * CTR/TMA/ATZ/RMZ/TMZ — informacja o zbliżaniu się do granicy.
+     */
+    fun allAlerts(
+        zones: List<Zone>,
+        areas: List<pl.pilot.vornav.data.AirspaceArea>,
+        pos: Position,
+        now: Long,
+        lookAheadNm: Double = 5.0,
+    ): List<AirAlert> {
+        val out = ArrayList<AirAlert>()
+        for (a in check(zones, pos, now, lookAheadNm)) {
+            out.add(
+                AirAlert(
+                    "AUP:${a.zone.designator}",
+                    if (a.inside) "JESTEŚ W AKTYWNEJ STREFIE ${a.zone.designator}"
+                    else "Aktywna strefa ${a.zone.designator} za ${fmtNm(a.distNm)} NM" + (a.minutes?.let { " (${fmtMin(it)})" } ?: ""),
+                    "${altText(a.res)} • ${timeText(a.res)}" + if (a.res.remarks.isNotBlank()) " • ${a.res.remarks}" else "",
+                    if (a.inside) 2 else 1, a.distNm
+                )
+            )
+        }
+        val ahead = aheadPoints(pos, lookAheadNm)
+        val aupNames = zones.map { norm(it.designator) }.toSet()
+        for (ar in areas) {
+            val c = ar.category
+            val relevantCat = c == pl.pilot.vornav.data.AspCategory.RPD || c == pl.pilot.vornav.data.AspCategory.CTR ||
+                c == pl.pilot.vornav.data.AspCategory.TMA || c == pl.pilot.vornav.data.AspCategory.ATZ ||
+                c == pl.pilot.vornav.data.AspCategory.RMZ
+            if (!relevantCat) continue
+            if (norm(ar.name) in aupNames) continue          // już obsłużona przez AUP
+            if (!ar.verticallyContains(pos.altFt, 300)) continue
+            val inside = ar.contains(pos.lat, pos.lon)
+            val isRpd = c == pl.pilot.vornav.data.AspCategory.RPD
+            if (inside) {
+                if (!isRpd) continue                           // CTR/TMA nad nami pokazuje linia „Przestrzeń w Twojej pozycji”
+                val prohibited = ar.type == 3
+                out.add(
+                    AirAlert(
+                        "ASP:${ar.name}",
+                        if (prohibited) "JESTEŚ W STREFIE ZAKAZANEJ ${ar.name}" else "Jesteś w strefie ${ar.name} (${ar.label})",
+                        "${ar.lowerText}–${ar.upperText}" + if (!prohibited) " • sprawdź aktywność w AUP/NOTAM" else "",
+                        if (prohibited) 2 else 1, 0.0
+                    )
+                )
+                continue
+            }
+            val hit = ahead.firstOrNull { (_, p) -> ar.contains(p.first, p.second) } ?: continue
+            val d = hit.first
+            val mins = d / pos.gsKt * 60.0
+            out.add(
+                AirAlert(
+                    "ASP:${ar.name}",
+                    when {
+                        ar.type == 3 -> "STREFA ZAKAZANA ${ar.name} za ${fmtNm(d)} NM (${fmtMin(mins)})"
+                        isRpd -> "${ar.label} ${ar.name} za ${fmtNm(d)} NM (${fmtMin(mins)})"
+                        else -> "Granica ${ar.name} (${ar.label}) za ${fmtNm(d)} NM"
+                    },
+                    "${ar.lowerText}–${ar.upperText}" + if (isRpd && ar.type != 3) " • sprawdź aktywność w AUP/NOTAM" else "",
+                    when { ar.type == 3 -> 1; isRpd -> 1; else -> 0 }, d
+                )
+            )
+        }
+        return out.distinctBy { it.key }.sortedWith(compareBy({ -it.level }, { it.distNm }))
+    }
+
+    private fun norm(s: String) = s.uppercase().replace(" ", "")
+
+    private fun fmtNm(d: Double) = String.format(java.util.Locale.US, if (d < 10) "%.1f" else "%.0f", d)
+    private fun fmtMin(m: Double): String {
+        val t = Math.round(m * 60).toInt(); return String.format(java.util.Locale.US, "%d:%02d", t / 60, t % 60)
     }
 }

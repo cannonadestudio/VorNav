@@ -97,6 +97,14 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
     val aspStatus = MutableStateFlow("")
     val aspBusy = MutableStateFlow(false)
 
+    // ---------- ostrzeżenia w locie ----------
+    private val _alerts = MutableStateFlow<List<pl.pilot.vornav.nav.AirAlert>>(emptyList())
+    val alerts: StateFlow<List<pl.pilot.vornav.nav.AirAlert>> = _alerts
+    val alertSound = MutableStateFlow(prefs.getBoolean("alertSound", true))
+    val showMapInstruments = MutableStateFlow(prefs.getBoolean("mapInstr", true))
+    private var alertedKeys = emptySet<String>()
+    private val tone by lazy { runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 90) }.getOrNull() }
+
     /** Komunikat jednorazowy (snackbar). */
     val toast = MutableStateFlow<String?>(null)
 
@@ -134,7 +142,10 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
         }
         // automatyczne przełączanie odcinków trasy
         viewModelScope.launch {
-            position.collect { p -> if (p != null && routeActive.value) autoSequence(p) }
+            position.collect { p ->
+                if (p != null && routeActive.value) autoSequence(p)
+                if (p != null) updateAlerts(p) else _alerts.value = emptyList()
+            }
         }
     }
 
@@ -374,6 +385,33 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
     /** Strefy widoczne wg włączonych grup i limitu dolnej granicy. */
     fun visibleAreas(all: List<AirspaceArea>, cats: Set<AspCategory>, maxFt: Int): List<AirspaceArea> =
         all.filter { it.category in cats && it.lowerFt < maxFt }
+
+    // ---------- ostrzeżenia ----------
+
+    private suspend fun updateAlerts(p: pl.pilot.vornav.loc.Position) {
+        val maxFt = zoneMaxFt.value
+        val z = visibleZones(zones.value, maxFt)
+        val a = if (showAreas.value) areas.value.filter { it.lowerFt < maxFt } else emptyList()
+        val list = withContext(Dispatchers.Default) {
+            pl.pilot.vornav.nav.ZoneAlerts.allAlerts(z, a, p, System.currentTimeMillis())
+        }
+        _alerts.value = list
+        // dźwięk + wibracja przy nowym ostrzeżeniu pomarańczowym/czerwonym
+        val serious = list.filter { it.level >= 1 }.map { it.key }.toSet()
+        val fresh = serious - alertedKeys
+        alertedKeys = serious
+        if (fresh.isNotEmpty() && alertSound.value) {
+            val red = list.any { it.level == 2 && it.key in fresh }
+            tone?.startTone(if (red) android.media.ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK else android.media.ToneGenerator.TONE_PROP_BEEP2, if (red) 1500 else 500)
+            runCatching {
+                val v = getApplication<Application>().getSystemService(android.os.Vibrator::class.java)
+                v?.vibrate(android.os.VibrationEffect.createOneShot(if (red) 800L else 300L, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        }
+    }
+
+    fun setAlertSound(v: Boolean) { alertSound.value = v; prefs.edit().putBoolean("alertSound", v).apply() }
+    fun setShowMapInstruments(v: Boolean) { showMapInstruments.value = v; prefs.edit().putBoolean("mapInstr", v).apply() }
 
     // ---------- ADF ----------
 

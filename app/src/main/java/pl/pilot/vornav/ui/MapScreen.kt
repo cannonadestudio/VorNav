@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -360,10 +361,22 @@ fun MapScreen(vm: NavViewModel) {
                     onClick = { vm.setShowZones(!showZones) },
                     containerColor = if (showZones) ZoneRed else Color(0xFF37474F)
                 ) { Icon(Icons.Filled.Layers, "Strefy") }
+                val instrOn by vm.showMapInstruments.collectAsState()
+                SmallFloatingActionButton(
+                    onClick = { vm.setShowMapInstruments(!instrOn) },
+                    containerColor = if (instrOn) Amber else Color(0xFF37474F)
+                ) { Icon(Icons.Filled.Speed, "Przyrządy") }
                 SmallFloatingActionButton(onClick = { mapView.controller.zoomIn() }) { Text("+") }
                 SmallFloatingActionButton(onClick = { mapView.controller.zoomOut() }) { Text("−") }
             }
-            Box(Modifier.align(Alignment.TopCenter).padding(start = 8.dp, end = 64.dp, top = 64.dp)) { ZoneAlertBanner(vm) }
+            Box(Modifier.align(Alignment.TopCenter).padding(start = 8.dp, end = 64.dp, top = 64.dp)) { ZoneAlertBanner(vm, max = 2, compact = true) }
+            val showInstr by vm.showMapInstruments.collectAsState()
+            if (showInstr && selected == null && tapPoint == null) {
+                MapInstruments(
+                    vm, pos, settings,
+                    Modifier.align(Alignment.BottomStart).padding(start = 8.dp, end = 8.dp, bottom = 22.dp)
+                )
+            }
             if (direct != null && pos != null) {
                 val bd = brgDist(pos, direct!!)
                 Row(

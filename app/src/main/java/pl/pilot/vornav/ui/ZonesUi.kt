@@ -24,36 +24,23 @@ import pl.pilot.vornav.nav.ZoneAlerts
 val ZoneRed = Color(0xFFE53935)
 val ZoneOrange = Color(0xFFFF9800)
 
-/** Ostrzeżenie: samolot w aktywnej strefie albo leci na nią (w ciągu 5 NM). */
+/** Ostrzeżenia w locie: aktywne strefy AUP oraz R/P/D i granice CTR/TMA z AIP (do 5 NM przed samolotem). */
 @Composable
-fun ZoneAlertBanner(vm: NavViewModel) {
-    val pos by vm.position.collectAsState()
-    val all by vm.zones.collectAsState()
-    val maxFt by vm.zoneMaxFt.collectAsState()
-    val p = pos ?: return
-    val visible = remember(all, maxFt) { vm.visibleZones(all, maxFt) }
-    val alerts = remember(p, visible) { ZoneAlerts.check(visible, p, System.currentTimeMillis()) }
+fun ZoneAlertBanner(vm: NavViewModel, max: Int = 2, compact: Boolean = false) {
+    val alerts by vm.alerts.collectAsState()
     if (alerts.isEmpty()) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        alerts.take(2).forEach { a ->
+        alerts.take(max).forEach { a ->
+            val bg = when (a.level) { 2 -> ZoneRed; 1 -> ZoneOrange; else -> Color(0xFF64B5F6) }
             Column(
-                Modifier.fillMaxWidth()
-                    .background(if (a.inside) ZoneRed else ZoneOrange, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                Modifier.fillMaxWidth().background(bg, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = if (compact) 4.dp else 6.dp)
             ) {
-                Text(
-                    if (a.inside) "JESTEŚ W AKTYWNEJ STREFIE ${a.zone.designator}"
-                    else "Aktywna strefa ${a.zone.designator} za ${fmtNm(a.distNm)} NM (${fmtMin(a.minutes)})",
-                    color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp
-                )
-                Text(
-                    "${ZoneAlerts.altText(a.res)} • ${ZoneAlerts.timeText(a.res)}" +
-                        if (a.res.remarks.isNotBlank()) " • ${a.res.remarks}" else "",
-                    color = Color.Black, fontSize = 12.sp
-                )
+                Text(a.title, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = if (compact) 13.sp else 14.sp, maxLines = 2)
+                if (!compact || a.level == 2) Text(a.detail, color = Color.Black, fontSize = 12.sp, maxLines = 2)
             }
         }
-        if (alerts.size > 2) Text("…i ${alerts.size - 2} kolejne", fontSize = 11.sp, color = ZoneOrange)
+        if (alerts.size > max) Text("…i ${alerts.size - max} kolejne", fontSize = 11.sp, color = ZoneOrange)
     }
 }
 
@@ -92,6 +79,12 @@ fun ZonesSection(vm: NavViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilterChip(onlyNow, { onlyNow = true }, { Text("Aktywne teraz") })
             FilterChip(!onlyNow, { onlyNow = false }, { Text("Teraz i później") })
+        }
+        val sound by vm.alertSound.collectAsState()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(sound, { vm.setAlertSound(it) })
+            Spacer(Modifier.width(8.dp))
+            Text("Dźwięk i wibracja przy ostrzeżeniu o strefie", fontSize = 13.sp)
         }
         ExpandRow("Lista stref (${list.size})", listOpen) { listOpen = !listOpen }
         if (listOpen && list.isEmpty()) Text("Brak stref do pokazania", fontSize = 12.sp, color = Color(0xFF8FA3B8))
