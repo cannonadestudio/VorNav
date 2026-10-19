@@ -1,22 +1,48 @@
 name: Zbuduj APK
+
 on:
   push:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Rozpakuj VorNav.zip (jeśli jest w repozytorium)
+        run: |
+          if [ -f VorNav.zip ]; then
+            mkdir -p /tmp/src && unzip -q -o VorNav.zip -d /tmp/src
+            SRC=$(dirname "$(find /tmp/src -name settings.gradle.kts | head -1)")
+          else
+            SRC="$GITHUB_WORKSPACE"
+          fi
+          echo "Buduję z: $SRC"
+          echo "SRC=$SRC" >> "$GITHUB_ENV"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.14.3
+
       - name: Budowanie APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        working-directory: ${{ env.SRC }}
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon 2>&1 | tee /tmp/build.log
+
+      - name: Podsumowanie błędów (skopiuj to Claude)
+        if: failure()
+        run: |
+          echo "===== BŁĘDY ====="
+          grep -E "^e: |error:|What went wrong" -A 6 /tmp/build.log | grep -v "^\s*at " | head -80 || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: VorNav-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ env.SRC }}/app/build/outputs/apk/debug/*.apk
