@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "DriveMonitor"
+rootProject.name = "VorNav"
 include(":app")
