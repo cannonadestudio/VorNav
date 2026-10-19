@@ -5,7 +5,7 @@ import pl.pilot.vornav.loc.Position
 import kotlin.math.cos
 import kotlin.math.sqrt
 
-enum class HdgSource(val label: String) { MANUAL("HDG z żyrobusoli"), TRACK("TRK z GPS"), NONE("brak kursu") }
+enum class HdgSource(val label: String) { MANUAL("HDG z żyrobusoli"), SIM("HDG symulacji"), TRACK("TRK z GPS"), NONE("brak kursu") }
 
 data class AdfReading(
     val inRange: Boolean,
@@ -50,6 +50,7 @@ object AdfReceiver {
         val trkMag = pos.trackTrue?.takeIf { pos.gsKt > 3.0 }?.let { Mag.trueToMag(it, decl) }
         val (hdg, src) = when {
             manualHdgMag != null -> manualHdgMag to HdgSource.MANUAL
+            pos.headingMag != null -> pos.headingMag to HdgSource.SIM
             trkMag != null -> trkMag to HdgSource.TRACK
             else -> null to HdgSource.NONE
         }

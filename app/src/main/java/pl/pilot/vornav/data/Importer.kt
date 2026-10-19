@@ -31,6 +31,8 @@ class Importer(private val db: NavDb) {
         try {
             w.delete("airports", "source='oa'", null)
             w.delete("navaids", "source='oa'", null)
+            w.delete("runways", null, null)
+            val oaToIdent = HashMap<String, Pair<String, Double>>()   // ident OurAirports → (nasz ident, elewacja)
 
             progress("Pobieranie pomocy nawigacyjnych…")
             val naStmt = w.compileStatement(
@@ -99,8 +101,49 @@ class Importer(private val db: NavDb) {
                     apStmt.bindString(7, cc)
                     apStmt.bindString(8, col(rec, "municipality"))
                     apStmt.executeInsert(); nAp++
+                    oaToIdent[col(rec, "ident")] = ident to (col(rec, "elevation_ft").toDoubleOrNull() ?: 0.0)
                 }
             }
+
+            progress("Pobieranie pasów startowych (do ILS)…")
+            val rwStmt = w.compileStatement(
+                "INSERT INTO runways(airport,ident,lat,lon,elev,hdg_true,length_ft,surface) VALUES(?,?,?,?,?,?,?,?)"
+            )
+            var nRw = 0
+            open(BASE + "runways.csv").use { r ->
+                val iter = csvRecords(r).iterator()
+                if (!iter.hasNext()) error("Pusty plik runways.csv")
+                val h = iter.next().withIndex().associate { (i, s) -> s to i }
+                fun col(rec: List<String>, n: String) = h[n]?.let { rec.getOrNull(it) }.orEmpty()
+                while (iter.hasNext()) {
+                    val rec = iter.next()
+                    val ap = oaToIdent[col(rec, "airport_ident")] ?: continue
+                    if (col(rec, "closed") == "1") continue
+                    val len = col(rec, "length_ft").toDoubleOrNull() ?: continue
+                    val leLat = col(rec, "le_latitude_deg").toDoubleOrNull()
+                    val leLon = col(rec, "le_longitude_deg").toDoubleOrNull()
+                    val heLat = col(rec, "he_latitude_deg").toDoubleOrNull()
+                    val heLon = col(rec, "he_longitude_deg").toDoubleOrNull()
+                    if (leLat == null || leLon == null || heLat == null || heLon == null) continue
+                    val surface = col(rec, "surface")
+                    // dwa kierunki pasa: próg „le” (lądowanie w stronę „he”) i odwrotnie
+                    for ((pre, la, lo, tla, tlo) in listOf(
+                        Q("le", leLat, leLon, heLat, heLon), Q("he", heLat, heLon, leLat, leLon)
+                    )) {
+                        val id = col(rec, "${pre}_ident")
+                        if (id.isBlank()) continue
+                        val hdg = col(rec, "${pre}_heading_degT").toDoubleOrNull()
+                            ?: pl.pilot.vornav.nav.Geo.bearingTrue(la, lo, tla, tlo)
+                        rwStmt.clearBindings()
+                        rwStmt.bindString(1, ap.first); rwStmt.bindString(2, id)
+                        rwStmt.bindDouble(3, la); rwStmt.bindDouble(4, lo)
+                        rwStmt.bindDouble(5, col(rec, "${pre}_elevation_ft").toDoubleOrNull() ?: ap.second)
+                        rwStmt.bindDouble(6, hdg); rwStmt.bindDouble(7, len); rwStmt.bindString(8, surface)
+                        rwStmt.executeInsert(); nRw++
+                    }
+                }
+            }
+            progress("Pasy: $nRw kierunków")
             w.setTransactionSuccessful()
         } finally {
             w.endTransaction()
@@ -158,6 +201,8 @@ class Importer(private val db: NavDb) {
     private fun bindOptD(s: android.database.sqlite.SQLiteStatement, i: Int, v: Double?) =
         if (v == null) s.bindNull(i) else s.bindDouble(i, v)
 }
+
+private data class Q(val a: String, val b: Double, val c: Double, val d: Double, val e: Double)
 
 /** Parser CSV zgodny z RFC 4180 (cudzysłowy, przecinki i nowe linie w polach). */
 fun csvRecords(r: BufferedReader): Sequence<List<String>> = sequence {

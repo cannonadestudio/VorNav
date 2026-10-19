@@ -105,6 +105,17 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
     private var alertedKeys = emptySet<String>()
     private val tone by lazy { runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 90) }.getOrNull() }
 
+    // ---------- ILS (syntetyczny z danych pasa, działa z GPS i w symulacji) ----------
+    val ils = MutableStateFlow<pl.pilot.vornav.data.Runway?>(null)
+
+    // ---------- zapis śladu ----------
+    val tracks = TrackStore(app)
+    val recording = MutableStateFlow(false)
+    val recPoints = MutableStateFlow<List<TrackPoint>>(emptyList())
+    private var recName = ""
+    /** Ślad wybrany do pokazania na mapie. */
+    val shownTrack = MutableStateFlow<List<TrackPoint>>(emptyList())
+
     /** Komunikat jednorazowy (snackbar). */
     val toast = MutableStateFlow<String?>(null)
 
@@ -122,6 +133,10 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
             }
             replan()
             refreshCounts()
+            ils.value = withContext(Dispatchers.IO) {
+                prefs.getString("ils_key", null)?.split("/")?.takeIf { it.size == 2 }
+                    ?.let { (ap, id) -> db.runways(ap).firstOrNull { it.ident == id } }
+            }
         }
         // strefy: najpierw z pamięci, potem odświeżanie co 30 min (AUP publikowany codziennie, UUP w ciągu dnia)
         viewModelScope.launch {
@@ -145,6 +160,7 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
             position.collect { p ->
                 if (p != null && routeActive.value) autoSequence(p)
                 if (p != null) updateAlerts(p) else _alerts.value = emptyList()
+                if (p != null && recording.value) recordPoint(p)
             }
         }
     }
@@ -412,6 +428,68 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAlertSound(v: Boolean) { alertSound.value = v; prefs.edit().putBoolean("alertSound", v).apply() }
     fun setShowMapInstruments(v: Boolean) { showMapInstruments.value = v; prefs.edit().putBoolean("mapInstr", v).apply() }
+
+    // ---------- trenery ----------
+    val trainer by lazy { TrainerController(this) }
+
+    // ---------- ILS ----------
+
+    suspend fun runwaysOf(airport: Waypoint): List<pl.pilot.vornav.data.Runway> =
+        withContext(Dispatchers.IO) { db.runways(airport.ident) }
+
+    fun tuneIls(rw: pl.pilot.vornav.data.Runway?) {
+        ils.value = rw
+        prefs.edit().putString("ils_key", rw?.key).apply()
+        if (rw != null) toast.value = "ILS ${rw.airport} RWY ${rw.ident}, kurs ${fmtDeg(ilsCourseMag(rw))}"
+    }
+
+    fun ilsCourseMag(rw: pl.pilot.vornav.data.Runway) = pl.pilot.vornav.nav.Mag.trueToMag(rw.hdgTrue, pl.pilot.vornav.nav.Mag.declination(rw.lat, rw.lon, rw.elevFt))
+
+    /** Ustawia samolot symulacji na przedłużeniu osi pasa (10 NM, z przesunięciem), do ćwiczenia podejścia. */
+    fun startIlsPractice(rw: pl.pilot.vornav.data.Runway, offsetDeg: Double) {
+        tuneIls(rw)
+        val p = pl.pilot.vornav.nav.Geo.destination(rw.lat, rw.lon, rw.hdgTrue + 180.0 + offsetDeg, 10.0)
+        val alt = rw.elevFt + 3000.0
+        // offset > 0: samolot na lewo od osi (patrząc w kierunku lądowania) → przechwycenie w prawo pod 45°
+        engine.placeSim(p.first, p.second, ilsCourseMag(rw) + offsetDeg * 3, Math.round(alt / 100.0) * 100.0)
+        startTrackRecording("ILS ${rw.airport} ${rw.ident}")
+    }
+
+    // ---------- zapis śladu ----------
+
+    fun startTrackRecording(name: String = "") {
+        recName = name
+        recPoints.value = emptyList()
+        recording.value = true
+    }
+
+    fun stopTrackRecording() {
+        if (!recording.value) return
+        recording.value = false
+        val pts = recPoints.value
+        if (pts.size >= 2) viewModelScope.launch(Dispatchers.IO) {
+            val f = tracks.save(recName, pts)
+            withContext(Dispatchers.Main) { toast.value = "Zapisano ślad: ${f.nameWithoutExtension}" }
+        }
+        shownTrack.value = pts
+    }
+
+    private fun recordPoint(p: pl.pilot.vornav.loc.Position) {
+        val list = recPoints.value
+        val last = list.lastOrNull()
+        if (last != null) {
+            val dt = p.timeMs - last.timeMs
+            val d = Geo.distanceNm(last.lat, last.lon, p.lat, p.lon)
+            if (dt < 2000 && d < 0.05) return
+        }
+        recPoints.value = if (list.size > 20000) list.drop(1) + TrackPoint(p.lat, p.lon, p.altFt, p.timeMs)
+        else list + TrackPoint(p.lat, p.lon, p.altFt, p.timeMs)
+    }
+
+    fun showTrack(f: java.io.File?) {
+        if (f == null) { shownTrack.value = emptyList(); return }
+        viewModelScope.launch { shownTrack.value = withContext(Dispatchers.IO) { tracks.load(f) } }
+    }
 
     // ---------- ADF ----------
 

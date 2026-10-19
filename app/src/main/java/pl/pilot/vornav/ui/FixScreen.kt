@@ -221,8 +221,8 @@ fun FixScreen(vm: NavViewModel) {
             var trk by remember { mutableStateOf(vm.engine.simTrackMag.toInt().toString()) }
             var alt by remember { mutableStateOf(vm.engine.simAltFt.toInt().toString()) }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                NumField(gs, { gs = it; num(it)?.let { v -> vm.engine.simGsKt = v } }, "GS kt", Modifier.weight(1f))
-                NumField(trk, { trk = it; num(it)?.let { v -> vm.engine.simTrackMag = v } }, "TRK °M", Modifier.weight(1f))
+                NumField(gs, { gs = it; num(it)?.let { v -> vm.engine.simGsKt = v } }, "TAS kt", Modifier.weight(1f))
+                NumField(trk, { trk = it; num(it)?.let { v -> vm.engine.simTrackMag = v } }, "HDG °M", Modifier.weight(1f))
                 NumField(alt, { alt = it; num(it)?.let { v -> vm.engine.simAltFt = v } }, "ALT ft", Modifier.weight(1f))
             }
             Row(verticalAlignment = Alignment.CenterVertically) {

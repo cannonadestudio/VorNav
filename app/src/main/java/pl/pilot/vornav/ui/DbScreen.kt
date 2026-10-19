@@ -57,7 +57,7 @@ fun DbScreen(vm: NavViewModel) {
                 Button(onClick = { vm.importOurAirports() }, enabled = !busy) {
                     Text(if (counts.first + counts.second == 0) "Pobierz bazę (OurAirports)" else "Aktualizuj bazę")
                 }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 if (status.isNotEmpty()) Text(status, fontSize = 13.sp, color = if (status.startsWith("Błąd")) Color(0xFFFF7043) else NavGreen)
                 Text(
                     "Źródło: OurAirports (domena publiczna). Dane mogą być niekompletne lub nieaktualne — przed lotem sprawdź AIP / VFR Polska. Pobieranie wymaga internetu, potem baza działa offline.",

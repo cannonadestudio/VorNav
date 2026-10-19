@@ -39,7 +39,8 @@ fun MapInstruments(vm: NavViewModel, pos: Position?, settings: NavSettings, modi
     val nav2 by vm.nav[1].collectAsState()
     val adf by vm.adf.collectAsState()
     val hdg by vm.manualHdg.collectAsState()
-    if (nav1.station == null && nav2.station == null && adf == null) return
+    val ils by vm.ils.collectAsState()
+    if (nav1.station == null && nav2.station == null && adf == null && ils == null) return
 
     Row(
         modifier.horizontalScroll(rememberScrollState()),
@@ -56,6 +57,21 @@ fun MapInstruments(vm: NavViewModel, pos: Position?, settings: NavSettings, modi
                     onMinus = { vm.setObs(i, slot.obs - 1) },
                     onPlus = { vm.setObs(i, slot.obs + 1) },
                     onCenter = { vm.centerObs(i) })
+            }
+        }
+        ils?.let { rw ->
+            val r = remember(rw, pos) { pos?.let { ilsReading(rw, it) } }
+            Column(
+                Modifier.width(120.dp).background(MiniBg, RoundedCornerShape(10.dp)).padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("ILS ${rw.ident}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NavGreen, maxLines = 1)
+                IlsIndicator(r, Modifier.size(64.dp))
+                Text("${fmtNm(r?.distThrNm)} NM", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Amber)
+                Text(
+                    "GP ${r?.let { (Math.round(it.glideAltFt / 10) * 10).toString() } ?: "--"}",
+                    fontSize = 12.sp, fontFamily = FontFamily.Monospace
+                )
             }
         }
         adf?.let { st ->

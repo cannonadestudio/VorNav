@@ -56,6 +56,7 @@ fun NavScreen(vm: NavViewModel) {
             DirectPanel(vm, pos)
             for (i in 0..1) NavPanel(i, vm, pos, settings) { tuneSlot = i }
             AdfPanel(vm, pos, settings) { tuneSlot = ADF_SLOT }
+            IlsPanel(vm, pos)
         }
     }
     tuneSlot?.let { TuneDialog(it, vm) { tuneSlot = null } }
@@ -216,6 +217,7 @@ private fun AdfPanel(vm: NavViewModel, pos: Position?, settings: NavSettings, on
         Text(
             when (reading?.headingSource) {
                 HdgSource.MANUAL -> "Kurs: HDG ${fmtDeg(hdg)} wpisany ręcznie (jak prawdziwy ADF)"
+                HdgSource.SIM -> "Kurs: HDG symulowanego samolotu (z uwzględnieniem wiatru)"
                 HdgSource.TRACK -> "Kurs: TRK z GPS — przy wietrze RB różni się od ADF o kąt znoszenia"
                 else -> "Brak kursu — wskazówka pokazuje QDM (tryb RMI, północ u góry)"
             },

@@ -184,7 +184,7 @@ fun AirspaceSection(vm: NavViewModel) {
             AssistChip(onClick = { vm.setAspPreset(StaticAirspaceRepo.EUROPE) }, label = { Text("Europa") })
         }
         Button(onClick = { vm.downloadAirspace() }, enabled = !busy) { Text(if (busy) "Pobieram…" else "Pobierz / aktualizuj przestrzeń") }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         Text(
             "Źródło: openAIP (openaip.net, CC BY-NC 4.0), aktualizowane przez openAIP codziennie; aplikacja odświeża dane co 7 dni lub na żądanie. Cała Europa to kilkaset MB pamięci — zalecane: Polska + sąsiedzi. Dane pomocnicze, nie zastępują AIP.",
             fontSize = 11.sp, color = Color(0xFF8FA3B8)

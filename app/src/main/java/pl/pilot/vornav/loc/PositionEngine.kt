@@ -25,6 +25,10 @@ data class Position(
     val source: PosSource,
     val accuracyM: Float? = null,
     val timeMs: Long = System.currentTimeMillis(),
+    /** Kurs magnetyczny (HDG) — znany tylko w symulacji; w realnym locie null (GPS daje tylko TRK). */
+    val headingMag: Double? = null,
+    /** Prędkość pionowa ft/min (symulacja). */
+    val vsFpm: Double? = null,
 )
 
 /**
@@ -56,16 +60,31 @@ class PositionEngine(ctx: Context) : LocationListener {
     private var lastRawTime = 0L
     private var lastTrack: Double? = null
 
-    // symulacja
+    // symulacja: samolot z kursem (HDG), prędkością (TAS), wiatrem i prędkością pionową
     var simActive = false; private set
     private var simLat = 0.0; private var simLon = 0.0
+    /** Prędkość własna (TAS) w kt. */
     var simGsKt = 90.0
+    /** Zadany kurs magnetyczny (samolot skręca do niego zakrętem standardowym 3°/s). */
     var simTrackMag = 0.0
+    /** Rzeczywisty kurs magnetyczny samolotu w symulacji. */
+    var simHdgMag = 0.0; private set
     var simAltFt = 2000.0
+    /** Prędkość pionowa ft/min (+ wznoszenie). */
+    var simVsFpm = 0.0
+    /** Wiatr: kierunek Z KTÓREGO wieje (°M) i prędkość kt. */
+    var windFromMag = 0.0
+    var windKt = 0.0
+    /** Prędkość zakrętu °/s (3 = zakręt standardowy). */
+    var turnRate = 3.0
+    private var simGs = 90.0
+    private var simTrkTrue = 0.0
 
     private val ticker = object : Runnable {
-        override fun run() { tick(); handler.postDelayed(this, 1000) }
+        override fun run() { tick(); handler.postDelayed(this, if (simActive) SIM_DT_MS else 1000L) }
     }
+
+    companion object { const val SIM_DT_MS = 500L }
 
     @SuppressLint("MissingPermission")
     fun start() {
@@ -120,10 +139,7 @@ class PositionEngine(ctx: Context) : LocationListener {
     private fun tick() {
         val now = System.currentTimeMillis()
         if (simActive) {
-            val d = simGsKt / 3600.0
-            val trueTrk = magToTrueHere(simLat, simLon, simTrackMag)
-            val p = Geo.destination(simLat, simLon, trueTrk, d)
-            simLat = p.first; simLon = p.second
+            stepSim(SIM_DT_MS / 1000.0)
             publishSim()
             return
         }
@@ -145,11 +161,41 @@ class PositionEngine(ctx: Context) : LocationListener {
     private fun magToTrueHere(lat: Double, lon: Double, mag: Double) =
         Geo.norm360(mag + pl.pilot.vornav.nav.Mag.declination(lat, lon, simAltFt))
 
+    /** Krok symulacji: zakręt do zadanego kursu, wektor wiatru, wysokość. */
+    private fun stepSim(dt: Double) {
+        val diff = Geo.norm180(simTrackMag - simHdgMag)
+        val maxTurn = turnRate * dt
+        simHdgMag = Geo.norm360(simHdgMag + diff.coerceIn(-maxTurn, maxTurn))
+        val decl = pl.pilot.vornav.nav.Mag.declination(simLat, simLon, simAltFt)
+        val hdgT = Math.toRadians(simHdgMag + decl)
+        // wiatr wieje Z kierunku windFrom, czyli przesuwa samolot w stronę windFrom+180
+        val wT = Math.toRadians(windFromMag + decl + 180.0)
+        val vn = simGsKt * Math.cos(hdgT) + windKt * Math.cos(wT)
+        val ve = simGsKt * Math.sin(hdgT) + windKt * Math.sin(wT)
+        simGs = Math.hypot(vn, ve)
+        simTrkTrue = Geo.norm360(Math.toDegrees(Math.atan2(ve, vn)))
+        val p = Geo.destination(simLat, simLon, simTrkTrue, simGs * dt / 3600.0)
+        simLat = p.first; simLon = p.second
+        simAltFt = (simAltFt + simVsFpm * dt / 60.0).coerceAtLeast(0.0)
+        if (simAltFt <= 0.0 && simVsFpm < 0) simVsFpm = 0.0
+    }
+
     private fun publishSim() {
         _position.value = Position(
-            simLat, simLon, manualAltFt ?: simAltFt, simGsKt,
-            magToTrueHere(simLat, simLon, simTrackMag), PosSource.SIM
+            simLat, simLon, manualAltFt ?: simAltFt, simGs,
+            simTrkTrue, PosSource.SIM, headingMag = simHdgMag, vsFpm = simVsFpm
         )
+    }
+
+    /** Ustawia samolot symulacji w punkcie z kursem i wysokością (np. start zadania treningowego). */
+    fun placeSim(lat: Double, lon: Double, hdgMag: Double, altFt: Double) {
+        simLat = lat; simLon = lon
+        simHdgMag = Geo.norm360(hdgMag); simTrackMag = simHdgMag
+        simAltFt = altFt; simVsFpm = 0.0
+        simActive = true
+        stepSim(0.0)
+        publishSim()
+        handler.removeCallbacks(ticker); handler.post(ticker)
     }
 
     /**
@@ -187,7 +233,9 @@ class PositionEngine(ctx: Context) : LocationListener {
     }
 
     fun startSim(lat: Double, lon: Double) {
-        simLat = lat; simLon = lon; simActive = true; publishSim()
+        simLat = lat; simLon = lon; simHdgMag = Geo.norm360(simTrackMag); simActive = true
+        stepSim(0.0); publishSim()
+        handler.removeCallbacks(ticker); handler.post(ticker)
     }
 
     fun stopSim() {

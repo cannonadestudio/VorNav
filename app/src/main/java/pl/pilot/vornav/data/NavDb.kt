@@ -9,8 +9,16 @@ import pl.pilot.vornav.nav.Geo
 import kotlin.math.cos
 import kotlin.math.max
 
+/** Kierunek pasa: próg [lat, lon], kierunek lądowania rzeczywisty. */
+data class Runway(
+    val airport: String, val ident: String, val lat: Double, val lon: Double,
+    val elevFt: Double, val hdgTrue: Double, val lengthFt: Double, val surface: String,
+) {
+    val key: String get() = "$airport/$ident"
+}
+
 /** Baza lotnisk, lądowisk i pomocy nawigacyjnych (SQLite, bez zależności zewnętrznych). */
-class NavDb(ctx: Context) : SQLiteOpenHelper(ctx, "navdb.sqlite", null, 1) {
+class NavDb(ctx: Context) : SQLiteOpenHelper(ctx, "navdb.sqlite", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -36,9 +44,39 @@ class NavDb(ctx: Context) : SQLiteOpenHelper(ctx, "navdb.sqlite", null, 1) {
         db.execSQL("CREATE INDEX ix_na_ident ON navaids(ident)")
         db.execSQL("CREATE INDEX ix_na_freq ON navaids(freq_khz)")
         db.execSQL("CREATE INDEX ix_na_lat ON navaids(lat)")
+        createRunways(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createRunways(db)
+    }
+
+    private fun createRunways(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS runways(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                airport TEXT NOT NULL, ident TEXT NOT NULL,
+                lat REAL NOT NULL, lon REAL NOT NULL, elev REAL NOT NULL DEFAULT 0,
+                hdg_true REAL NOT NULL, length_ft REAL NOT NULL, surface TEXT NOT NULL DEFAULT '')"""
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS ix_rw_ap ON runways(airport)")
+    }
+
+    /** Kierunki pasów lotniska (próg, elewacja, kierunek lądowania) — do syntetycznego ILS. */
+    fun runways(airportIdent: String): List<Runway> {
+        val out = ArrayList<Runway>()
+        readableDatabase.rawQuery(
+            "SELECT airport,ident,lat,lon,elev,hdg_true,length_ft,surface FROM runways WHERE airport=? ORDER BY ident",
+            arrayOf(airportIdent)
+        ).use { c ->
+            while (c.moveToNext()) out.add(
+                Runway(c.getString(0), c.getString(1), c.getDouble(2), c.getDouble(3), c.getDouble(4), c.getDouble(5), c.getDouble(6), c.getString(7))
+            )
+        }
+        return out
+    }
+
+    fun runwayCount(): Int = readableDatabase.rawQuery("SELECT count(*) FROM runways", null).use { it.moveToFirst(); it.getInt(0) }
 
     // ---------- odczyt ----------
 

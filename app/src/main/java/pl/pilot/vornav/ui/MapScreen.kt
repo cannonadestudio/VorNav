@@ -49,6 +49,25 @@ class NavOverlay(
 ) : Overlay() {
     /** Strefy openAIP do narysowania (już przefiltrowane). */
     var areas: List<pl.pilot.vornav.data.AirspaceArea> = emptyList()
+    /** Holding do narysowania (racetrack), oś ILS (próg → 10 NM), ślad lotu, linia kursu przechwycenia. */
+    var holdShape: List<Pair<Double, Double>> = emptyList()
+    var ilsLine: Pair<Pair<Double, Double>, Pair<Double, Double>>? = null
+    var track: List<Pair<Double, Double>> = emptyList()
+    var interceptLine: Pair<Pair<Double, Double>, Pair<Double, Double>>? = null
+
+    private fun drawPolyline(c: Canvas, mv: MapView, pts: List<Pair<Double, Double>>, color: Int, width: Float, dash: Boolean = false) {
+        if (pts.size < 2) return
+        val pj = mv.projection
+        val path = Path()
+        pts.forEachIndexed { i, (la, lo) ->
+            pj.toPixels(GeoPoint(la, lo), pt)
+            if (i == 0) path.moveTo(pt.x.toFloat(), pt.y.toFloat()) else path.lineTo(pt.x.toFloat(), pt.y.toFloat())
+        }
+        stroke.color = color; stroke.strokeWidth = width
+        stroke.pathEffect = if (dash) android.graphics.DashPathEffect(floatArrayOf(20f, 12f), 0f) else null
+        c.drawPath(path, stroke)
+        stroke.pathEffect = null
+    }
     private val areaFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val areaText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 22f; textAlign = Paint.Align.CENTER
@@ -152,6 +171,11 @@ class NavOverlay(
                 if (zoom >= 9) c.drawText(label, pt.x.toFloat(), pt.y + 28f, zoneText)
             }
         }
+
+        drawPolyline(c, mv, track, 0xFF29B6F6.toInt(), 5f)
+        drawPolyline(c, mv, holdShape, 0xFF00E676.toInt(), 6f)
+        ilsLine?.let { (a, b) -> drawPolyline(c, mv, listOf(a, b), 0xFF00E676.toInt(), 6f, dash = true) }
+        interceptLine?.let { (a, b) -> drawPolyline(c, mv, listOf(a, b), 0xFF00E676.toInt(), 5f, dash = true) }
 
         if (route.size >= 2) {
             for (k in 0 until route.size - 1) {
@@ -332,6 +356,28 @@ fun MapScreen(vm: NavViewModel) {
         }
     }
 
+    val holdShape by vm.trainer.holdShape.collectAsState()
+    val icTask by vm.trainer.intercept.collectAsState()
+    val ilsRw by vm.ils.collectAsState()
+    val shownTrack by vm.shownTrack.collectAsState()
+    val recPts by vm.recPoints.collectAsState()
+    val recOn by vm.recording.collectAsState()
+    LaunchedEffect(holdShape, icTask, ilsRw, shownTrack, recPts, recOn) {
+        overlay.holdShape = holdShape
+        overlay.ilsLine = ilsRw?.let { rw ->
+            val far = Geo.destination(rw.lat, rw.lon, rw.hdgTrue + 180.0, 10.0)
+            (rw.lat to rw.lon) to far
+        }
+        overlay.interceptLine = icTask?.let { t ->
+            val st = t.station
+            val decl = if (st.hasVor) VorReceiver.stationVariation(st, settings) else Mag.declination(st.lat, st.lon)
+            val radialTrue = Mag.magToTrue(if (t.inbound) t.courseMag + 180.0 else t.courseMag, decl)
+            (st.lat to st.lon) to Geo.destination(st.lat, st.lon, radialTrue, 30.0)
+        }
+        overlay.track = (if (recOn) recPts else shownTrack).map { it.lat to it.lon }
+        mapView.invalidate()
+    }
+
     LaunchedEffect(routePts, routeOn, legIdx) {
         overlay.route = routePts
         overlay.activeLeg = if (routeOn) legIdx else -1
@@ -375,6 +421,9 @@ fun MapScreen(vm: NavViewModel) {
             }
             Box(Modifier.align(Alignment.TopCenter).padding(start = 8.dp, end = 64.dp, top = 64.dp)) { ZoneAlertBanner(vm, max = 2, compact = true) }
             val showInstr by vm.showMapInstruments.collectAsState()
+            if (pos?.source == pl.pilot.vornav.loc.PosSource.SIM && selected == null && tapPoint == null) {
+                Box(Modifier.align(Alignment.CenterStart).padding(start = 6.dp)) { SimControls(vm, compact = true) }
+            }
             if (showInstr && selected == null && tapPoint == null) {
                 MapInstruments(
                     vm, pos, settings,

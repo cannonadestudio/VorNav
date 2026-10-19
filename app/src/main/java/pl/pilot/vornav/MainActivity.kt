@@ -58,6 +58,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     MAP("Mapa", Icons.Filled.Map),
     NAV("NAV", Icons.Filled.Explore),
     ROUTE("Trasa", Icons.Filled.Timeline),
+    TRAIN("Trening", Icons.Filled.School),
     SEARCH("Szukaj", Icons.Filled.Search),
     FIX("Korekta", Icons.Filled.GpsFixed),
     DB("Baza", Icons.Filled.Storage),
@@ -99,6 +100,7 @@ private fun App(vm: NavViewModel, permissionGranted: Boolean) {
                 Tab.MAP -> MapScreen(vm)
                 Tab.NAV -> NavScreen(vm)
                 Tab.ROUTE -> RouteScreen(vm)
+                Tab.TRAIN -> TrainerScreen(vm)
                 Tab.SEARCH -> SearchScreen(vm)
                 Tab.FIX -> FixScreen(vm)
                 Tab.DB -> DbScreen(vm)
