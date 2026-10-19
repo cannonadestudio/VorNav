@@ -92,8 +92,8 @@ private fun MiniNav(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("−", fontSize = 18.sp, color = Magenta, modifier = Modifier.clickable(onClick = onMinus).padding(horizontal = 6.dp))
                 Text(
-                    "${fmtDeg(obs)} ${when (r?.toFrom) { ToFrom.TO -> "TO"; ToFrom.FROM -> "FR"; else -> "--" }}",
-                    fontSize = 13.sp, fontFamily = FontFamily.Monospace, color = Magenta,
+                    "OBS ${fmtDeg(obs)} ${when (r?.toFrom) { ToFrom.TO -> "TO"; ToFrom.FROM -> "FR"; else -> "--" }}",
+                    fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Magenta, maxLines = 1,
                     modifier = Modifier.weight(1f).clickable(onClick = onCenter)
                 )
                 Text("+", fontSize = 18.sp, color = Magenta, modifier = Modifier.clickable(onClick = onPlus).padding(horizontal = 6.dp))

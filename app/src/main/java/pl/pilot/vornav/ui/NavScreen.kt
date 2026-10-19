@@ -108,10 +108,21 @@ private fun NavPanel(i: Int, vm: NavViewModel, pos: Position?, settings: NavSett
         }
         if (st.hasVor) {
             Spacer(Modifier.height(6.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                for (d in listOf(-10, -1)) OutlinedButton(onClick = { vm.setObs(i, slot.obs + d) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("$d") }
-                Button(onClick = { vm.centerObs(i) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("CDI→TO") }
-                for (d in listOf(1, 10)) OutlinedButton(onClick = { vm.setObs(i, slot.obs + d) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+$d") }
+            // OBS: każdy przycisk ma równą szerokość, żeby na wąskim ekranie żaden nie „znikał”
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("OBS", color = Magenta, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                for (d in listOf(-10, -1)) OutlinedButton(
+                    onClick = { vm.setObs(i, slot.obs + d) }, modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp)
+                ) { Text("$d", maxLines = 1) }
+                Button(
+                    onClick = { vm.centerObs(i) }, modifier = Modifier.weight(1.3f),
+                    contentPadding = PaddingValues(0.dp)
+                ) { Text("→TO", maxLines = 1) }
+                for (d in listOf(1, 10)) OutlinedButton(
+                    onClick = { vm.setObs(i, slot.obs + d) }, modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp)
+                ) { Text("+$d", maxLines = 1) }
             }
         }
     }

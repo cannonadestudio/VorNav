@@ -18,6 +18,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -87,17 +89,6 @@ class NavOverlay(
         val zoom = mv.zoomLevelDouble
         drawn.clear()
 
-        for ((st, brg, idx) in radials) {
-            // linia kursu przez stację (obejmuje lot TO i FROM)
-            val e1 = Geo.destination(st.lat, st.lon, brg, 120.0)
-            val e2 = Geo.destination(st.lat, st.lon, brg + 180.0, 120.0)
-            pj.toPixels(GeoPoint(e2.first, e2.second), pt); pj.toPixels(GeoPoint(e1.first, e1.second), pt2)
-            stroke.color = if (idx == 0) 0xFFE040FB.toInt() else 0xFF00BCD4.toInt()
-            stroke.strokeWidth = 4f
-            stroke.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f, 12f), 0f)
-            c.drawLine(pt.x.toFloat(), pt.y.toFloat(), pt2.x.toFloat(), pt2.y.toFloat(), stroke)
-            stroke.pathEffect = null
-        }
 
         // statyczna przestrzeń (openAIP): tylko w widoku, bez strzępków mniejszych niż kilka pikseli
         if (areas.isNotEmpty()) {
@@ -171,6 +162,18 @@ class NavOverlay(
                 stroke.strokeWidth = if (k == activeLeg) 9f else 6f
                 c.drawLine(pt.x.toFloat(), pt.y.toFloat(), pt2.x.toFloat(), pt2.y.toFloat(), stroke)
             }
+        }
+
+        for ((st, brg, idx) in radials) {
+            // linia kursu przez stację (obejmuje lot TO i FROM)
+            val e1 = Geo.destination(st.lat, st.lon, brg, 120.0)
+            val e2 = Geo.destination(st.lat, st.lon, brg + 180.0, 120.0)
+            pj.toPixels(GeoPoint(e2.first, e2.second), pt); pj.toPixels(GeoPoint(e1.first, e1.second), pt2)
+            stroke.color = if (idx == 0) 0xFFE040FB.toInt() else 0xFF00BCD4.toInt()
+            stroke.strokeWidth = 4f
+            stroke.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f, 12f), 0f)
+            c.drawLine(pt.x.toFloat(), pt.y.toFloat(), pt2.x.toFloat(), pt2.y.toFloat(), stroke)
+            stroke.pathEffect = null
         }
 
         for (wp in points) {
@@ -349,9 +352,10 @@ fun MapScreen(vm: NavViewModel) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        StatusBar(pos, gps)
-        Box(Modifier.weight(1f)) {
-            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+        // belka z GS/TRK/ALT nad mapą (zIndex) — osmdroid przewija swój widok i bez przycięcia potrafi go zasłonić
+        Box(Modifier.zIndex(2f)) { StatusBar(pos, gps) }
+        Box(Modifier.weight(1f).clipToBounds()) {
+            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize().clipToBounds())
             Column(Modifier.align(Alignment.TopEnd).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SmallFloatingActionButton(
                     onClick = { follow = !follow },
