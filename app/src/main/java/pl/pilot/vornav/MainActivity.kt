@@ -81,6 +81,11 @@ private fun App(vm: NavViewModel, permissionGranted: Boolean) {
         toast?.let { snack.showSnackbar(it); vm.toast.value = null }
     }
 
+    val ilsRes by vm.ilsResult.collectAsState()
+    ilsRes?.let { r ->
+        IlsResultDialog(r, onRetry = { vm.repeatIlsPractice(); tab = Tab.MAP }, onClose = { vm.ilsResult.value = null })
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
