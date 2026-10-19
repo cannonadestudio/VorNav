@@ -49,17 +49,20 @@ fun SimControls(vm: NavViewModel, compact: Boolean) {
     val trkMag = p?.trackTrue?.let { Mag.trueToMag(it, Mag.declination(p.lat, p.lon)) }
 
     if (compact) {
+        fun hdg(d: Int) { e.simTrackMag = pl.pilot.vornav.nav.Geo.norm360(e.simTrackMag + d) }
         Column(
-            Modifier.width(78.dp).background(Color(0xE607111C), RoundedCornerShape(10.dp)).padding(4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)
+            Modifier.width(112.dp).background(Color(0xF007111C), RoundedCornerShape(12.dp)).padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("HDG", fontSize = 9.sp, color = Hint)
-            Text(fmtDeg(e.simTrackMag), fontSize = 14.sp, fontFamily = FontFamily.Monospace, color = Magenta, fontWeight = FontWeight.Bold)
-            Row { SmallBtn("◀10") { e.simTrackMag = pl.pilot.vornav.nav.Geo.norm360(e.simTrackMag - 10) }; SmallBtn("10▶") { e.simTrackMag = pl.pilot.vornav.nav.Geo.norm360(e.simTrackMag + 10) } }
-            Row { SmallBtn("◀1") { e.simTrackMag = pl.pilot.vornav.nav.Geo.norm360(e.simTrackMag - 1) }; SmallBtn("1▶") { e.simTrackMag = pl.pilot.vornav.nav.Geo.norm360(e.simTrackMag + 1) } }
-            Text("VS ${e.simVsFpm.toInt()}", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            Row { SmallBtn("▼") { e.simVsFpm -= 250 }; SmallBtn("▲") { e.simVsFpm += 250 } }
-            SmallBtn("VS 0") { e.simVsFpm = 0.0 }
+            Text("KURS", fontSize = 11.sp, color = Hint)
+            Text(fmtDeg(e.simTrackMag), fontSize = 20.sp, fontFamily = FontFamily.Monospace, color = Magenta, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { MapBtn("−10") { hdg(-10) }; MapBtn("+10") { hdg(10) } }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { MapBtn("−1") { hdg(-1) }; MapBtn("+1") { hdg(1) } }
+            Spacer(Modifier.height(2.dp))
+            Text("VS ft/min", fontSize = 11.sp, color = Hint)
+            Text("%+d".format(e.simVsFpm.toInt()), fontSize = 18.sp, fontFamily = FontFamily.Monospace, color = Amber, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { MapBtn("▼") { e.simVsFpm -= 100 }; MapBtn("▲") { e.simVsFpm += 100 } }
+            MapBtn("VS 0", wide = true) { e.simVsFpm = 0.0 }
         }
         return
     }
@@ -93,6 +96,17 @@ fun SimControls(vm: NavViewModel, compact: Boolean) {
             NumIn(wk, { wk = it; num(it)?.let { v -> e.windKt = v } }, "Wiatr kt", Modifier.weight(1f))
         }
     }
+}
+
+/** Duży, czytelny przycisk do sterowania na mapie (min. 46×40 dp). */
+@Composable
+fun MapBtn(t: String, wide: Boolean = false, color: Color = Color.White, onClick: () -> Unit) {
+    Box(
+        Modifier.size(if (wide) 96.dp else 46.dp, 40.dp)
+            .background(Color(0xFF2B3D52), RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Text(t, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = color, maxLines = 1) }
 }
 
 @Composable
@@ -291,7 +305,14 @@ private fun IlsPracticeCard(vm: NavViewModel) {
             }
         }
         val r = rw
-        Button(onClick = { if (r != null) vm.startIlsPractice(r, offset.toDouble()) }, enabled = r != null) { Text("Start podejścia (symulacja)") }
+        val session by vm.ilsSession.collectAsState()
+        if (session) {
+            Text("Podejście w toku — przejdź na Mapę. Po przyziemieniu zobaczysz wynik i wykresy.", fontSize = 13.sp, color = NavGreen)
+            OutlinedButton(onClick = { vm.stopIlsPractice() }) { Text("Przerwij podejście") }
+        } else {
+            Button(onClick = { if (r != null) vm.startIlsPractice(r, offset.toDouble()) }, enabled = r != null) { Text("Start podejścia (symulacja)") }
+        }
+        Text("Ląduj: utrzymuj LOC i GS, a tuż nad pasem zmniejsz opadanie (VS ▲) do ok. −200 ft/min.", fontSize = 12.sp, color = Hint)
         Text("Wskazówka: na ścieżce opadaj ok. 5 × GS (przy 90 kt ≈ 480 ft/min).", fontSize = 12.sp, color = Hint)
     }
     if (pick) WaypointPickerDialog("Lotnisko", vm, { if (it.kind == Waypoint.Kind.AIRPORT) airport = it }) { pick = false }

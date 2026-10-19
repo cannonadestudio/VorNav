@@ -61,17 +61,35 @@ fun MapInstruments(vm: NavViewModel, pos: Position?, settings: NavSettings, modi
         }
         ils?.let { rw ->
             val r = remember(rw, pos) { pos?.let { ilsReading(rw, it) } }
+            val samples by vm.ilsSamples.collectAsState()
+            val session by vm.ilsSession.collectAsState()
+            val cur = remember(rw, pos) { pos?.let { IlsGeom.sample(rw, it) } }
             Column(
-                Modifier.width(120.dp).background(MiniBg, RoundedCornerShape(10.dp)).padding(6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                Modifier.width(210.dp).background(MiniBg, RoundedCornerShape(10.dp)).padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text("ILS ${rw.ident}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NavGreen, maxLines = 1)
-                IlsIndicator(r, Modifier.size(64.dp))
-                Text("${fmtNm(r?.distThrNm)} NM", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Amber)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("ILS ${rw.ident}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NavGreen, modifier = Modifier.weight(1f))
+                    Text("${fmtNm(r?.distThrNm)} NM", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Amber)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IlsIndicator(r, Modifier.size(70.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Column {
+                        Text("VS teraz", fontSize = 9.sp, color = MiniLabel)
+                        Text("%+d".format((pos?.vsFpm ?: 0.0).toInt()), fontSize = 15.sp, fontFamily = FontFamily.Monospace, color = Amber, fontWeight = FontWeight.Bold)
+                        Text("VS na 3°", fontSize = 9.sp, color = MiniLabel)
+                        Text(r?.let { "-%d".format(it.vsForGsFpm.toInt()) } ?: "--", fontSize = 15.sp, fontFamily = FontFamily.Monospace, color = NavGreen, fontWeight = FontWeight.Bold)
+                    }
+                }
                 Text(
-                    "GP ${r?.let { (Math.round(it.glideAltFt / 10) * 10).toString() } ?: "--"}",
-                    fontSize = 12.sp, fontFamily = FontFamily.Monospace
+                    "Wys. ${pos?.altFt?.toInt() ?: "--"} / ścieżka ${r?.let { (Math.round(it.glideAltFt / 10) * 10).toString() } ?: "--"} ft",
+                    fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                    color = if (r != null && pos != null && kotlin.math.abs(pos.altFt - r.glideAltFt) > 150) ZoneOrange else Color.White
                 )
+                if (cur != null && cur.distNm in -0.5..12.0) {
+                    MiniProfile(if (session) samples else emptyList(), cur, Modifier.fillMaxWidth().height(56.dp))
+                }
             }
         }
         adf?.let { st ->
@@ -95,7 +113,7 @@ private fun MiniNav(
     onMinus: () -> Unit, onPlus: () -> Unit, onCenter: () -> Unit,
 ) {
     Column(
-        Modifier.width(150.dp).background(MiniBg, RoundedCornerShape(10.dp)).padding(6.dp),
+        Modifier.width(176.dp).background(MiniBg, RoundedCornerShape(10.dp)).padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -106,13 +124,13 @@ private fun MiniNav(
         if (hasVor) {
             MiniCdi(r, Modifier.fillMaxWidth().height(22.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("−", fontSize = 18.sp, color = Magenta, modifier = Modifier.clickable(onClick = onMinus).padding(horizontal = 6.dp))
-                Text(
-                    "OBS ${fmtDeg(obs)} ${when (r?.toFrom) { ToFrom.TO -> "TO"; ToFrom.FROM -> "FR"; else -> "--" }}",
-                    fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Magenta, maxLines = 1,
-                    modifier = Modifier.weight(1f).clickable(onClick = onCenter)
-                )
-                Text("+", fontSize = 18.sp, color = Magenta, modifier = Modifier.clickable(onClick = onPlus).padding(horizontal = 6.dp))
+                MapBtn("−", color = Magenta, onClick = onMinus)
+                Column(Modifier.weight(1f).clickable(onClick = onCenter), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("OBS", fontSize = 9.sp, color = MiniLabel)
+                    Text(fmtDeg(obs), fontSize = 15.sp, fontFamily = FontFamily.Monospace, color = Magenta, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(when (r?.toFrom) { ToFrom.TO -> "TO"; ToFrom.FROM -> "FROM"; else -> "--" }, fontSize = 10.sp, color = Color.White)
+                }
+                MapBtn("+", color = Magenta, onClick = onPlus)
             }
         }
         Row {
@@ -125,6 +143,27 @@ private fun MiniNav(
                 Text(if (r?.dmeValid == true) fmtNm(r.dmeNm) else "-.--", fontSize = 13.sp, fontFamily = FontFamily.Monospace, color = Amber)
             }
         }
+    }
+}
+
+/** Mały profil pionowy: ścieżka 3° (zielona przerywana), przeleciana droga (pomarańczowa), samolot (fiolet). */
+@Composable
+private fun MiniProfile(samples: List<IlsSample>, cur: IlsSample, modifier: Modifier) {
+    val maxNm = maxOf(10.0, cur.distNm)
+    val maxFt = maxOf(3200.0, cur.altAboveThr + 300)
+    Canvas(modifier.background(Color(0xFF07111C), RoundedCornerShape(6.dp))) {
+        fun x(d: Double) = ((maxNm - d) / (maxNm + 0.5)).toFloat().coerceIn(0f, 1f) * size.width
+        fun y(a: Double) = (1f - (a / maxFt).toFloat().coerceIn(0f, 1f)) * (size.height - 4f) + 2f
+        val tan3 = Math.tan(Math.toRadians(3.0)) * pl.pilot.vornav.nav.Geo.FT_PER_NM
+        drawLine(NavGreen, Offset(x(maxNm), y(maxNm * tan3)), Offset(x(0.0), y(0.0)), 3f,
+            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 8f)))
+        drawLine(Color(0xFF8FA3B8), Offset(x(0.0), y(0.0)), Offset(size.width, y(0.0)), 4f)   // pas
+        if (samples.size >= 2) {
+            val path = Path()
+            samples.forEachIndexed { i, s -> if (i == 0) path.moveTo(x(s.distNm), y(s.altAboveThr)) else path.lineTo(x(s.distNm), y(s.altAboveThr)) }
+            drawPath(path, Amber, style = Stroke(3f))
+        }
+        drawCircle(Magenta, 6f, Offset(x(cur.distNm), y(cur.altAboveThr)))
     }
 }
 

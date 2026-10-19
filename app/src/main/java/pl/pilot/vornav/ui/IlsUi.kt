@@ -103,6 +103,12 @@ fun IlsPanel(vm: NavViewModel, pos: Position?) {
                     Readout("VS NA 3° fpm", reading?.let { "-${it.vsForGsFpm.toInt()}" } ?: "--")
                 }
             }
+            val samples by vm.ilsSamples.collectAsState()
+            val session by vm.ilsSession.collectAsState()
+            val cur = remember(r, pos) { pos?.let { IlsGeom.sample(r, it) } }
+            if (cur != null && cur.distNm in -0.5..15.0) {
+                IlsProfileChart(if (session) samples else emptyList(), cur, maxOf(10.0, cur.distNm), Modifier.padding(top = 6.dp))
+            }
             Text(
                 "Syntetyczny ILS liczony z GPS i danych pasa (oś pasa, ścieżka 3°) — do treningu i orientacji, nie do podejść w IMC.",
                 fontSize = 11.sp, color = Color(0xFF8FA3B8)

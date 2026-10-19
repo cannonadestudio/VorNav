@@ -107,6 +107,11 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- ILS (syntetyczny z danych pasa, działa z GPS i w symulacji) ----------
     val ils = MutableStateFlow<pl.pilot.vornav.data.Runway?>(null)
+    /** Trwające ćwiczenie podejścia ILS (symulacja) i zebrane próbki. */
+    val ilsSession = MutableStateFlow(false)
+    val ilsSamples = MutableStateFlow<List<IlsSample>>(emptyList())
+    val ilsResult = MutableStateFlow<IlsResult?>(null)
+    private var ilsOffset = 0.0
 
     // ---------- zapis śladu ----------
     val tracks = TrackStore(app)
@@ -161,6 +166,7 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
                 if (p != null && routeActive.value) autoSequence(p)
                 if (p != null) updateAlerts(p) else _alerts.value = emptyList()
                 if (p != null && recording.value) recordPoint(p)
+                if (p != null && ilsSession.value) ilsStep(p)
             }
         }
     }
@@ -448,11 +454,50 @@ class NavViewModel(app: Application) : AndroidViewModel(app) {
     /** Ustawia samolot symulacji na przedłużeniu osi pasa (10 NM, z przesunięciem), do ćwiczenia podejścia. */
     fun startIlsPractice(rw: pl.pilot.vornav.data.Runway, offsetDeg: Double) {
         tuneIls(rw)
+        ilsOffset = offsetDeg
+        ilsSamples.value = emptyList()
+        ilsResult.value = null
+        ilsSession.value = true
         val p = pl.pilot.vornav.nav.Geo.destination(rw.lat, rw.lon, rw.hdgTrue + 180.0 + offsetDeg, 10.0)
         val alt = rw.elevFt + 3000.0
         // offset > 0: samolot na lewo od osi (patrząc w kierunku lądowania) → przechwycenie w prawo pod 45°
         engine.placeSim(p.first, p.second, ilsCourseMag(rw) + offsetDeg * 3, Math.round(alt / 100.0) * 100.0)
         startTrackRecording("ILS ${rw.airport} ${rw.ident}")
+    }
+
+    fun repeatIlsPractice() {
+        val r = ilsResult.value?.rw ?: ils.value ?: return
+        startIlsPractice(r, ilsOffset)
+    }
+
+    fun stopIlsPractice() { ilsSession.value = false }
+
+    /** Próbkowanie podejścia i wykrycie przyziemienia / zakończenia. */
+    private fun ilsStep(p: pl.pilot.vornav.loc.Position) {
+        val rw = ils.value ?: return
+        if (p.source != pl.pilot.vornav.loc.PosSource.SIM) return
+        val s = IlsGeom.sample(rw, p)
+        val list = ilsSamples.value
+        ilsSamples.value = if (list.size > 6000) list.drop(1) + s else list + s
+        val lenNm = rw.lengthFt / Geo.FT_PER_NM
+        val verdict: Pair<Boolean, String>? = when {
+            p.altFt <= rw.elevFt + 3 -> when {
+                s.distNm > 0.05 -> false to "Przyziemienie PRZED progiem pasa (${"%.0f".format(s.distNm * Geo.FT_PER_NM)} ft)"
+                -s.distNm > lenNm -> false to "Przyziemienie ZA końcem pasa"
+                kotlin.math.abs(s.xtkFt) > 100 -> false to "Przyziemienie obok pasa (${"%.0f".format(kotlin.math.abs(s.xtkFt))} ft od osi)"
+                else -> true to "Wylądowano na pasie ${rw.ident}"
+            }
+            -s.distNm > lenNm + 0.5 -> false to "Przelot nad pasem bez lądowania (odejście na drugi krąg)"
+            s.distNm > 25 -> false to "Odlot daleko od lotniska — ćwiczenie przerwane"
+            else -> null
+        }
+        if (verdict != null) {
+            ilsSession.value = false
+            engine.simVsFpm = 0.0
+            engine.stopSim()
+            stopTrackRecording()
+            ilsResult.value = IlsGeom.evaluate(rw, ilsSamples.value, verdict.first, verdict.second, s)
+        }
     }
 
     // ---------- zapis śladu ----------
